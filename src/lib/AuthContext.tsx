@@ -54,20 +54,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
 
     // If signing up as cliente, also create a record in the clientes table
-    // src/lib/AuthContext.tsx
-if (!error && data.user && role === 'cliente') {
-  const { error: dbError } = await supabase.from('clientes').insert({
-    id: data.user.id,
-    email,
-    nombre: nombre ?? '',
-    fecha_registro: new Date().toISOString()
-  })
-  
-  if (dbError) {
-    console.error("Error creando perfil de cliente:", dbError.message)
-    return { error: new Error("Usuario creado pero hubo un error al registrar el perfil de cliente.") }
-  }
-}
+    if (!error && data.user && role === 'cliente') {
+      await supabase.from('clientes').insert({
+        id: data.user.id,
+        email,
+        nombre: nombre ?? '',
+        fecha_registro: new Date().toISOString()
+      })
+    }
 
     return { error }
   }
