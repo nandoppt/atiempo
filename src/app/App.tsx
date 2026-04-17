@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { Toaster } from 'sonner'
 import { AuthProvider, useAuth } from '../lib/AuthContext'
 import LoginPage from './components/LoginPage'
 import AdminLayout from './components/AdminLayout'
@@ -52,6 +53,16 @@ function AppRoutes() {
 export default function App() {
   return (
     <AuthProvider>
+      {/* Toast notifications - visible globally */}
+      <Toaster
+        position="top-right"
+        richColors
+        closeButton
+        toastOptions={{
+          duration: 4000,
+          style: { fontFamily: 'inherit' },
+        }}
+      />
       <AppRoutes />
     </AuthProvider>
   )

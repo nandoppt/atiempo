@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Clock, Eye, EyeOff, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { useAuth } from '../../lib/AuthContext'
 import { UserRole } from '../../lib/supabase'
 
@@ -12,23 +13,46 @@ export default function LoginPage() {
   const [nombre, setNombre] = useState('')
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  const [successMsg, setSuccessMsg] = useState<string | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setErrorMsg(null)
-    setSuccessMsg(null)
+
+    if (mode === 'register' && nombre.trim().length < 2) {
+      toast.error('Ingresa tu nombre completo')
+      return
+    }
+    if (password.length < 6) {
+      toast.error('La contraseña debe tener al menos 6 caracteres')
+      return
+    }
+
     setLoading(true)
 
     if (mode === 'login') {
       const { error } = await signIn(email, password)
-      if (error) setErrorMsg(error.message)
-      // On success, AuthContext updates user/role and App.tsx redirects automatically
+      if (error) {
+        if (error.message.includes('Invalid login')) {
+          toast.error('Email o contraseña incorrectos')
+        } else if (error.message.includes('Email not confirmed')) {
+          toast.error('Confirma tu email antes de iniciar sesión')
+        } else {
+          toast.error(error.message)
+        }
+      }
+      // On success AuthContext updates and App redirects automatically
     } else {
       const { error } = await signUp(email, password, role, nombre)
-      if (error) setErrorMsg(error.message)
-      else setSuccessMsg('¡Cuenta creada! Revisa tu email para confirmar tu cuenta.')
+      if (error) {
+        if (error.message.includes('already registered')) {
+          toast.error('Este email ya tiene una cuenta. Inicia sesión.')
+        } else {
+          toast.error(error.message)
+        }
+      } else {
+        toast.success('¡Cuenta creada! Inicia sesión para continuar.', { duration: 5000 })
+        setMode('login')
+        setPassword('')
+      }
     }
 
     setLoading(false)
@@ -37,7 +61,6 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
       <div className="max-w-md w-full">
-
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="flex justify-center items-center gap-2 mb-4">
@@ -48,49 +71,44 @@ export default function LoginPage() {
         </div>
 
         <div className="bg-white rounded-2xl shadow-xl p-8">
-
           {/* Mode toggle */}
           <div className="flex bg-gray-100 rounded-xl p-1 mb-6">
-            <button
-              onClick={() => { setMode('login'); setErrorMsg(null) }}
-              className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${mode === 'login' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}
-            >
-              Iniciar sesión
-            </button>
-            <button
-              onClick={() => { setMode('register'); setErrorMsg(null) }}
-              className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${mode === 'register' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}
-            >
-              Crear cuenta
-            </button>
+            {(['login', 'register'] as const).map(m => (
+              <button
+                key={m}
+                onClick={() => { setMode(m); }}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
+                  mode === m ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {m === 'login' ? 'Iniciar sesión' : 'Crear cuenta'}
+              </button>
+            ))}
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-
-            {/* Role selector - only on register */}
+            {/* Role - only register */}
             {mode === 'register' && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de cuenta</label>
                 <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setRole('cliente')}
-                    className={`flex-1 py-3 rounded-xl border-2 text-sm font-medium transition-all ${role === 'cliente' ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600'}`}
-                  >
-                    👤 Cliente
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRole('admin')}
-                    className={`flex-1 py-3 rounded-xl border-2 text-sm font-medium transition-all ${role === 'admin' ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600'}`}
-                  >
-                    🔑 Administrador
-                  </button>
+                  {(['cliente', 'admin'] as UserRole[]).map(r => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setRole(r)}
+                      className={`flex-1 py-3 rounded-xl border-2 text-sm font-medium transition-all ${
+                        role === r ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                      }`}
+                    >
+                      {r === 'cliente' ? '👤 Cliente' : '🔑 Administrador'}
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
 
-            {/* Nombre - only on register */}
+            {/* Nombre - only register */}
             {mode === 'register' && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Nombre completo</label>
@@ -99,7 +117,7 @@ export default function LoginPage() {
                   value={nombre}
                   onChange={e => setNombre(e.target.value)}
                   placeholder="Tu nombre"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-sm"
                   required
                 />
               </div>
@@ -113,7 +131,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 placeholder="tu@email.com"
-                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-sm"
                 required
               />
             </div>
@@ -126,8 +144,8 @@ export default function LoginPage() {
                   type={showPass ? 'text' : 'password'}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none pr-12"
+                  placeholder="Mínimo 6 caracteres"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none pr-12 text-sm"
                   required
                   minLength={6}
                 />
@@ -140,18 +158,6 @@ export default function LoginPage() {
                 </button>
               </div>
             </div>
-
-            {/* Error / Success messages */}
-            {errorMsg && (
-              <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
-                {errorMsg}
-              </div>
-            )}
-            {successMsg && (
-              <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm text-green-700">
-                {successMsg}
-              </div>
-            )}
 
             {/* Submit */}
             <button
