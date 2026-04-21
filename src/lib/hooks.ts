@@ -1,6 +1,21 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, Cita, Cliente, Servicio, CitaEstado } from './supabase'
 
+// ─── Timezone helper ──────────────────────────────────────────────────────────
+// Builds a timezone-aware ISO string for local midnight/end-of-day
+function localDayRange(fecha: string) {
+  const offset = new Date().getTimezoneOffset() // minutes, negative for UTC+
+  const sign = offset <= 0 ? '+' : '-'
+  const absOffset = Math.abs(offset)
+  const hh = String(Math.floor(absOffset / 60)).padStart(2, '0')
+  const mm = String(absOffset % 60).padStart(2, '0')
+  const tz = `${sign}${hh}:${mm}`
+  return {
+    startOfDay: `${fecha}T00:00:00${tz}`,
+    endOfDay: `${fecha}T23:59:59${tz}`,
+  }
+}
+
 // ─── useCitas ─────────────────────────────────────────────────────────────────
 // Admin: todas las citas con realtime
 
@@ -29,7 +44,6 @@ export function useCitas(filterEstado?: CitaEstado | 'all') {
   useEffect(() => {
     fetchCitas()
 
-    // Realtime: re-fetch on any change to citas table
     const channel = supabase
       .channel('citas-admin-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'citas' }, () => {
@@ -87,6 +101,7 @@ export function useCitasCliente(clienteId: string | undefined) {
 }
 
 // ─── useCitasPorFecha ─────────────────────────────────────────────────────────
+// Timezone-aware: uses local midnight → end-of-day
 
 export function useCitasPorFecha(fecha: string) {
   const [citas, setCitas] = useState<Cita[]>([])
@@ -94,8 +109,7 @@ export function useCitasPorFecha(fecha: string) {
 
   const fetchCitas = useCallback(async () => {
     setLoading(true)
-    const startOfDay = `${fecha}T00:00:00+00:00`
-    const endOfDay = `${fecha}T23:59:59+00:00`
+    const { startOfDay, endOfDay } = localDayRange(fecha)
     const { data } = await supabase
       .from('citas')
       .select(`*, clientes ( nombre ), servicios ( nombre, duracion_minutos )`)
@@ -120,6 +134,51 @@ export function useCitasPorFecha(fecha: string) {
   }, [fetchCitas, fecha])
 
   return { citas, loading }
+}
+
+// ─── useCitasPorMes ───────────────────────────────────────────────────────────
+// Returns a map of { 'YYYY-MM-DD': count } for calendar dot indicators
+// Only counts non-cancelled appointments
+
+export function useCitasPorMes(year: number, month: number) {
+  const [citasPorDia, setCitasPorDia] = useState<Record<string, number>>({})
+
+  const fetchCitas = useCallback(async () => {
+    const monthStr = String(month + 1).padStart(2, '0')
+    const lastDayOfMonth = new Date(year, month + 1, 0).getDate()
+    const { startOfDay: start } = localDayRange(`${year}-${monthStr}-01`)
+    const { endOfDay: end } = localDayRange(`${year}-${monthStr}-${String(lastDayOfMonth).padStart(2, '0')}`)
+
+    const { data } = await supabase
+      .from('citas')
+      .select('fecha_hora_inicio, estado')
+      .gte('fecha_hora_inicio', start)
+      .lte('fecha_hora_inicio', end)
+      .neq('estado', 'cancelada')
+
+    const counts: Record<string, number> = {}
+    data?.forEach(c => {
+      if (c.fecha_hora_inicio) {
+        // Convert UTC timestamp to local date string
+        const localDate = new Date(c.fecha_hora_inicio).toLocaleDateString('en-CA') // YYYY-MM-DD
+        counts[localDate] = (counts[localDate] ?? 0) + 1
+      }
+    })
+    setCitasPorDia(counts)
+  }, [year, month])
+
+  useEffect(() => {
+    fetchCitas()
+
+    const channel = supabase
+      .channel(`citas-mes-${year}-${month}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'citas' }, fetchCitas)
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [fetchCitas, year, month])
+
+  return citasPorDia
 }
 
 // ─── useClientes ──────────────────────────────────────────────────────────────
@@ -158,9 +217,8 @@ export function useAdminStats() {
   const [loading, setLoading] = useState(true)
 
   const fetchStats = useCallback(async () => {
-    const hoy = new Date().toISOString().split('T')[0]
-    const startOfDay = `${hoy}T00:00:00+00:00`
-    const endOfDay = `${hoy}T23:59:59+00:00`
+    const hoy = new Date().toLocaleDateString('en-CA') // YYYY-MM-DD in local time
+    const { startOfDay, endOfDay } = localDayRange(hoy)
 
     const [citasHoy, totalClientes, completadas, pendientes] = await Promise.all([
       supabase.from('citas').select('id', { count: 'exact', head: true }).gte('fecha_hora_inicio', startOfDay).lte('fecha_hora_inicio', endOfDay),

@@ -1,4 +1,4 @@
-import { Calendar, Clock, Trash2, CheckCircle, X, Filter, AlertTriangle } from 'lucide-react'
+import { Calendar, Clock, Trash2, CheckCircle, X, Filter, AlertTriangle, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { useCitas, useCitasCliente, updateEstadoCita, deleteCita } from '../../lib/hooks'
@@ -15,28 +15,44 @@ export default function AppointmentList({ userType }: AppointmentListProps) {
   const [filterStatus, setFilterStatus] = useState<CitaEstado | 'all'>('all')
   const [showModal, setShowModal] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [procesando, setProcesando] = useState<string | null>(null)
 
   const adminQuery = useCitas(filterStatus)
   const clientQuery = useCitasCliente(userType === 'client' ? user?.id : undefined)
   const { citas, loading, refetch } = userType === 'admin' ? adminQuery : clientQuery
 
   const handleConfirm = async (id: string, nombreCliente: string) => {
+    setProcesando(id)
     const { error } = await updateEstadoCita(id, 'confirmada')
+    setProcesando(null)
     if (error) toast.error('Error al confirmar la cita')
-    else toast.success(`Cita de ${nombreCliente} confirmada ✓`)
+    else {
+      toast.success(`Cita de ${nombreCliente} confirmada ✓`)
+      refetch()
+    }
   }
 
   const handleCancel = async (id: string, nombreCliente: string) => {
+    setProcesando(id)
     const { error } = await updateEstadoCita(id, 'cancelada')
+    setProcesando(null)
     if (error) toast.error('Error al cancelar la cita')
-    else toast.warning(`Cita ${userType === 'client' ? 'cancelada' : `de ${nombreCliente} cancelada`}`)
+    else {
+      toast.warning(`Cita ${userType === 'client' ? 'cancelada' : `de ${nombreCliente} cancelada`}`)
+      refetch()
+    }
   }
 
   const handleDelete = async (id: string) => {
+    setProcesando(id)
     const { error } = await deleteCita(id)
+    setProcesando(null)
     setConfirmDelete(null)
     if (error) toast.error('Error al eliminar la cita')
-    else toast.success('Cita eliminada correctamente')
+    else {
+      toast.success('Cita eliminada correctamente')
+      refetch()
+    }
   }
 
   const filteredCitas = userType === 'client' && filterStatus !== 'all'
@@ -95,7 +111,10 @@ export default function AppointmentList({ userType }: AppointmentListProps) {
       {/* List */}
       <div className="space-y-4">
         {loading ? (
-          <div className="bg-white rounded-xl p-12 text-center text-gray-400">Cargando citas...</div>
+          <div className="bg-white rounded-xl p-12 text-center text-gray-400 flex items-center justify-center gap-2">
+            <Loader2 className="w-5 h-5 animate-spin" />
+            Cargando citas...
+          </div>
         ) : filteredCitas.length === 0 ? (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
             <Calendar className="w-16 h-16 text-gray-300 mx-auto mb-4" />
@@ -107,6 +126,7 @@ export default function AppointmentList({ userType }: AppointmentListProps) {
           const servicio = cita.servicios?.nombre ?? 'Sin servicio'
           const fechaHora = cita.fecha_hora_inicio ? new Date(cita.fecha_hora_inicio) : null
           const isActive = cita.estado !== 'cancelada' && cita.estado !== 'completada'
+          const isProcessing = procesando === cita.id
 
           return (
             <div key={cita.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition-all">
@@ -143,17 +163,25 @@ export default function AppointmentList({ userType }: AppointmentListProps) {
                       {userType === 'admin' && cita.estado === 'pendiente' && (
                         <button
                           onClick={() => handleConfirm(cita.id, nombreCliente)}
-                          className="flex items-center gap-1.5 px-4 py-2 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 transition-all text-sm font-medium border border-green-200"
+                          disabled={isProcessing}
+                          className="flex items-center gap-1.5 px-4 py-2 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 transition-all text-sm font-medium border border-green-200 disabled:opacity-60 disabled:cursor-not-allowed"
                         >
-                          <CheckCircle className="w-4 h-4" />
+                          {isProcessing
+                            ? <Loader2 className="w-4 h-4 animate-spin" />
+                            : <CheckCircle className="w-4 h-4" />
+                          }
                           Confirmar
                         </button>
                       )}
                       <button
                         onClick={() => handleCancel(cita.id, nombreCliente)}
-                        className="flex items-center gap-1.5 px-4 py-2 bg-orange-50 text-orange-700 rounded-lg hover:bg-orange-100 transition-all text-sm font-medium border border-orange-200"
+                        disabled={isProcessing}
+                        className="flex items-center gap-1.5 px-4 py-2 bg-orange-50 text-orange-700 rounded-lg hover:bg-orange-100 transition-all text-sm font-medium border border-orange-200 disabled:opacity-60 disabled:cursor-not-allowed"
                       >
-                        <X className="w-4 h-4" />
+                        {isProcessing
+                          ? <Loader2 className="w-4 h-4 animate-spin" />
+                          : <X className="w-4 h-4" />
+                        }
                         Cancelar
                       </button>
                     </>
@@ -164,13 +192,18 @@ export default function AppointmentList({ userType }: AppointmentListProps) {
                       <div className="flex gap-1">
                         <button
                           onClick={() => handleDelete(cita.id)}
-                          className="flex items-center gap-1 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all text-xs font-medium"
+                          disabled={isProcessing}
+                          className="flex items-center gap-1 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all text-xs font-medium disabled:opacity-60"
                         >
-                          <AlertTriangle className="w-3 h-3" />
+                          {isProcessing
+                            ? <Loader2 className="w-3 h-3 animate-spin" />
+                            : <AlertTriangle className="w-3 h-3" />
+                          }
                           Confirmar
                         </button>
                         <button
                           onClick={() => setConfirmDelete(null)}
+                          disabled={isProcessing}
                           className="px-3 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-all text-xs font-medium"
                         >
                           No
@@ -179,7 +212,8 @@ export default function AppointmentList({ userType }: AppointmentListProps) {
                     ) : (
                       <button
                         onClick={() => setConfirmDelete(cita.id)}
-                        className="flex items-center gap-1.5 px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-all text-sm font-medium border border-red-200"
+                        disabled={isProcessing}
+                        className="flex items-center gap-1.5 px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-all text-sm font-medium border border-red-200 disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         <Trash2 className="w-4 h-4" />
                         Eliminar

@@ -1,13 +1,14 @@
 import { useState } from 'react'
-import { ChevronLeft, ChevronRight, Clock, User, Plus } from 'lucide-react'
-import { useCitasPorFecha } from '../../lib/hooks'
+import { ChevronLeft, ChevronRight, Clock, User } from 'lucide-react'
+import { useCitasPorFecha, useCitasPorMes } from '../../lib/hooks'
 
 export default function CalendarView() {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState(new Date())
 
-  const selectedDateKey = selectedDate.toISOString().split('T')[0]
+  const selectedDateKey = selectedDate.toLocaleDateString('en-CA') // YYYY-MM-DD in local time
   const { citas, loading } = useCitasPorFecha(selectedDateKey)
+  const citasPorDia = useCitasPorMes(currentDate.getFullYear(), currentDate.getMonth())
 
   const monthNames = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
   const daysOfWeek = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb']
@@ -35,6 +36,16 @@ export default function CalendarView() {
     return date.toDateString() === selectedDate.toDateString()
   }
 
+  const getDayKey = (date: Date) => date.toLocaleDateString('en-CA') // YYYY-MM-DD local
+
+  const handlePrevMonth = () => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1))
+  }
+
+  const handleNextMonth = () => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1))
+  }
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       {/* Calendar */}
@@ -46,13 +57,13 @@ export default function CalendarView() {
             </h3>
             <div className="flex gap-2">
               <button
-                onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1))}
+                onClick={handlePrevMonth}
                 className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
               >
                 <ChevronLeft className="w-5 h-5" />
               </button>
               <button
-                onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1))}
+                onClick={handleNextMonth}
                 className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
               >
                 <ChevronRight className="w-5 h-5" />
@@ -60,29 +71,42 @@ export default function CalendarView() {
             </div>
           </div>
 
-          <div className="grid grid-cols-7 gap-2">
+          <div className="grid grid-cols-7 gap-1">
             {daysOfWeek.map(d => (
               <div key={d} className="text-center text-sm font-medium text-gray-500 py-2">{d}</div>
             ))}
-            {days.map((date, index) => (
-              date === null
-                ? <div key={`empty-${index}`} className="aspect-square" />
-                : (
-                  <button
-                    key={index}
-                    onClick={() => setSelectedDate(date)}
-                    className={`aspect-square p-2 rounded-lg transition-all text-sm font-medium ${
-                      isSelected(date)
-                        ? 'bg-indigo-600 text-white shadow-md'
-                        : isToday(date)
-                        ? 'bg-indigo-50 text-indigo-600 border-2 border-indigo-200'
-                        : 'hover:bg-gray-50 text-gray-700'
-                    }`}
-                  >
-                    {date.getDate()}
-                  </button>
-                )
-            ))}
+            {days.map((date, index) => {
+              if (date === null) {
+                return <div key={`empty-${index}`} className="aspect-square" />
+              }
+              const dayKey = getDayKey(date)
+              const citaCount = citasPorDia[dayKey] ?? 0
+              const hasCitas = citaCount > 0
+              const selected = isSelected(date)
+              const today = isToday(date)
+
+              return (
+                <button
+                  key={index}
+                  onClick={() => setSelectedDate(date)}
+                  className={`aspect-square p-1 rounded-lg transition-all text-sm font-medium flex flex-col items-center justify-center gap-0.5 ${
+                    selected
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : today
+                      ? 'bg-indigo-50 text-indigo-600 border-2 border-indigo-200'
+                      : 'hover:bg-gray-50 text-gray-700'
+                  }`}
+                >
+                  <span>{date.getDate()}</span>
+                  {hasCitas && (
+                    <span className={`block w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                      selected ? 'bg-white/70' : 'bg-indigo-400'
+                    }`} />
+                  )}
+                  {!hasCitas && <span className="block w-1.5 h-1.5 flex-shrink-0" />}
+                </button>
+              )
+            })}
           </div>
         </div>
 
@@ -94,6 +118,10 @@ export default function CalendarView() {
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-red-500" />
             <span className="text-sm text-gray-600">Ocupado</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+            <span className="text-sm text-gray-600">Con citas</span>
           </div>
         </div>
       </div>
@@ -116,6 +144,24 @@ export default function CalendarView() {
               </p>
             </div>
           </div>
+
+          {/* Extra stats */}
+          {!loading && citas.length > 0 && (
+            <div className="mt-4 grid grid-cols-2 gap-4">
+              <div className="bg-yellow-50 rounded-lg p-3">
+                <p className="text-sm text-gray-600">Pendientes</p>
+                <p className="text-2xl font-bold text-yellow-600">
+                  {citas.filter(c => c.estado === 'pendiente').length}
+                </p>
+              </div>
+              <div className="bg-blue-50 rounded-lg p-3">
+                <p className="text-sm text-gray-600">Completadas</p>
+                <p className="text-2xl font-bold text-blue-600">
+                  {citas.filter(c => c.estado === 'completada').length}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100">
@@ -137,24 +183,42 @@ export default function CalendarView() {
               const nombreCliente = cita.clientes?.nombre ?? cita.clientes?.email ?? 'Cliente'
               const servicio = cita.servicios?.nombre ?? 'Sin servicio'
 
+              const estadoColors: Record<string, string> = {
+                confirmada: 'bg-green-50 border-green-200',
+                pendiente: 'bg-yellow-50 border-yellow-200',
+                cancelada: 'bg-red-50 border-red-200',
+                completada: 'bg-blue-50 border-blue-200',
+              }
+              const badgeColors: Record<string, string> = {
+                confirmada: 'bg-green-100 text-green-700',
+                pendiente: 'bg-yellow-100 text-yellow-700',
+                cancelada: 'bg-red-100 text-red-700',
+                completada: 'bg-blue-100 text-blue-700',
+              }
+
+              const estado = cita.estado ?? 'pendiente'
+              const cardColor = estadoColors[estado] ?? estadoColors['pendiente']
+              const badgeColor = badgeColors[estado] ?? badgeColors['pendiente']
+
               return (
-                <div key={cita.id} className="p-4 rounded-lg border-2 bg-red-50 border-red-200">
+                <div key={cita.id} className={`p-4 rounded-lg border-2 ${cardColor}`}>
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
-                      <Clock className="w-4 h-4" />
-                      <span className="font-medium text-sm">{hora}</span>
+                      <Clock className="w-4 h-4 text-gray-500" />
+                      <span className="font-semibold text-sm text-gray-800">{hora}</span>
                     </div>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                      cita.estado === 'confirmada' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                    }`}>
-                      {cita.estado}
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${badgeColor}`}>
+                      {estado}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 text-sm">
-                    <User className="w-4 h-4" />
+                  <div className="flex items-center gap-2 text-sm text-gray-700">
+                    <User className="w-4 h-4 text-gray-400" />
                     <span className="font-medium">{nombreCliente}</span>
                   </div>
-                  <p className="text-xs text-gray-600 mt-1">{servicio}</p>
+                  <p className="text-xs text-gray-500 mt-1 ml-6">{servicio}</p>
+                  {cita.servicios?.duracion_minutos && (
+                    <p className="text-xs text-gray-400 mt-0.5 ml-6">{cita.servicios.duracion_minutos} min</p>
+                  )}
                 </div>
               )
             })}

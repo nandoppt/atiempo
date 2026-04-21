@@ -28,42 +28,42 @@ function AppRoutes() {
   }
 
   return (
-    <BrowserRouter>
-      <Routes>
-        {role === 'admin' ? (
-          <Route path="/" element={<AdminLayout />}>
-            <Route index element={<AdminDashboard />} />
-            <Route path="calendar" element={<CalendarView />} />
-            <Route path="appointments" element={<AppointmentList userType="admin" />} />
-            <Route path="chatbot" element={<ChatbotConfig />} />
-            <Route path="connections" element={<ConnectionsConfig />} />
-          </Route>
-        ) : (
-          <Route path="/" element={<ClientLayout />}>
-            <Route index element={<ClientDashboard />} />
-            <Route path="appointments" element={<AppointmentList userType="client" />} />
-          </Route>
-        )}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </BrowserRouter>
+    <Routes>
+      {role === 'admin' ? (
+        <Route path="/" element={<AdminLayout />}>
+          <Route index element={<AdminDashboard />} />
+          <Route path="calendar" element={<CalendarView />} />
+          <Route path="appointments" element={<AppointmentList userType="admin" />} />
+          <Route path="chatbot" element={<ChatbotConfig />} />
+          <Route path="connections" element={<ConnectionsConfig />} />
+        </Route>
+      ) : (
+        <Route path="/" element={<ClientLayout />}>
+          <Route index element={<ClientDashboard />} />
+          <Route path="appointments" element={<AppointmentList userType="client" />} />
+        </Route>
+      )}
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   )
 }
 
 export default function App() {
   return (
-    <AuthProvider>
-      {/* Toast notifications - visible globally */}
-      <Toaster
-        position="top-right"
-        richColors
-        closeButton
-        toastOptions={{
-          duration: 4000,
-          style: { fontFamily: 'inherit' },
-        }}
-      />
-      <AppRoutes />
-    </AuthProvider>
+    <BrowserRouter>
+      <AuthProvider>
+        {/* Toast notifications - visible globally */}
+        <Toaster
+          position="top-right"
+          richColors
+          closeButton
+          toastOptions={{
+            duration: 4000,
+            style: { fontFamily: 'inherit' },
+          }}
+        />
+        <AppRoutes />
+      </AuthProvider>
+    </BrowserRouter>
   )
 }
