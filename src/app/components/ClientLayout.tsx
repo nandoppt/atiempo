@@ -3,11 +3,13 @@ import { Calendar, LogOut, Bell, Clock } from 'lucide-react'
 import { useState } from 'react'
 import NotificationPanel from './NotificationPanel'
 import { useAuth } from '../../lib/AuthContext'
+import { useNotificacionesCliente } from '../../lib/hooks'
 
 export default function ClientLayout() {
   const location = useLocation()
   const { signOut, user } = useAuth()
   const [showNotifications, setShowNotifications] = useState(false)
+  const { noLeidas } = useNotificacionesCliente(user?.id)
 
   const navItems = [
     { path: '/', icon: Clock, label: 'Inicio' },
@@ -52,6 +54,11 @@ export default function ClientLayout() {
                 className="relative p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-all"
               >
                 <Bell className="w-6 h-6" />
+                {noLeidas > 0 && (
+                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-white text-xs flex items-center justify-center font-bold">
+                    {noLeidas > 9 ? '9+' : noLeidas}
+                  </span>
+                )}
               </button>
               <button
                 onClick={signOut}

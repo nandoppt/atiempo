@@ -3,11 +3,13 @@ import { LayoutDashboard, Calendar, MessageSquare, Settings, LogOut, Bell, List,
 import { useState } from 'react'
 import NotificationPanel from './NotificationPanel'
 import { useAuth } from '../../lib/AuthContext'
+import { useCitasPendientes } from '../../lib/hooks'
 
 export default function AdminLayout() {
   const location = useLocation()
   const { signOut, user } = useAuth()
   const [showNotifications, setShowNotifications] = useState(false)
+  const { pendientes } = useCitasPendientes()
 
   const navItems = [
     { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -46,6 +48,12 @@ export default function AdminLayout() {
                   >
                     <Icon className="w-5 h-5" />
                     {item.label}
+                    {/* Badge for pending on Citas */}
+                    {item.path === '/appointments' && pendientes.length > 0 && (
+                      <span className="ml-auto w-5 h-5 bg-orange-500 rounded-full text-white text-xs flex items-center justify-center font-bold">
+                        {pendientes.length > 9 ? '9+' : pendientes.length}
+                      </span>
+                    )}
                   </Link>
                 </li>
               )
@@ -68,7 +76,7 @@ export default function AdminLayout() {
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0">
         <header className="bg-white border-b border-gray-200 px-8 py-4">
           <div className="flex items-center justify-between">
             <div>
@@ -82,6 +90,11 @@ export default function AdminLayout() {
               className="relative p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-all"
             >
               <Bell className="w-6 h-6" />
+              {pendientes.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-white text-xs flex items-center justify-center font-bold">
+                  {pendientes.length > 9 ? '9+' : pendientes.length}
+                </span>
+              )}
             </button>
           </div>
         </header>
