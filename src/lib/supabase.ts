@@ -20,8 +20,7 @@ export interface Cita {
   fecha_hora_inicio: string | null
   estado: CitaEstado | null
   fecha_creacion: string | null
-  notas?: string | null
-  // Joined fields
+  // Joined
   clientes?: Cliente
   servicios?: Servicio
 }
@@ -39,8 +38,6 @@ export interface Servicio {
   nombre: string
   duracion_minutos: number | null
   activo: boolean | null
-  descripcion?: string | null
-  precio?: number | null
 }
 
 export interface Configuracion {
@@ -49,6 +46,7 @@ export interface Configuracion {
   horas_minimas_cancelacion: number | null
 }
 
+// Optional tables — created manually in Supabase if desired
 export interface PlantillaChatbot {
   id: string
   nombre: string
@@ -58,19 +56,11 @@ export interface PlantillaChatbot {
   created_at?: string
 }
 
-export interface ConfiguracionConexion {
-  id: string
-  servicio: 'whatsapp' | 'google_calendar' | 'apple_calendar'
-  conectado: boolean
-  datos: Record<string, string>
-  updated_at?: string
-}
-
 export interface NotificacionCliente {
   id: string
   cliente_id: string
   cita_id: string
-  tipo: 'confirmada' | 'cancelada' | 'recordatorio' | 'pendiente'
+  tipo: 'confirmada' | 'cancelada' | 'recordatorio' | 'pendiente' | 'completada'
   mensaje: string
   leida: boolean
   created_at: string
