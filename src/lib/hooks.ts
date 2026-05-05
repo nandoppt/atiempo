@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { supabase, Cita, Cliente, Servicio, CitaEstado, PlantillaChatbot, NotificacionCliente } from './supabase'
+import { useState, useEffect, useCallback } from 'react'
+import { supabase, Cita, Cliente, Servicio, CitaEstado, PlantillaChatbot, ConfiguracionConexion, NotificacionCliente } from './supabase'
 
 // ─── Timezone helper ──────────────────────────────────────────────────────────
 function localDayRange(fecha: string) {
@@ -15,10 +15,28 @@ function localDayRange(fecha: string) {
   }
 }
 
-// Each hook instance gets a unique channel name to avoid Supabase conflicts
-let _channelSeq = 0
-function mkChannel(base: string) {
-  return `${base}-${++_channelSeq}-${Date.now()}`
+async function enrichCitasWithRelations<T extends Partial<Cita>>(citas: T[]) {
+  if (!citas?.length) return citas
+
+  const clienteIds = Array.from(new Set(citas.map(c => c.cliente_id).filter(Boolean)))
+  const servicioIds = Array.from(new Set(citas.map(c => c.servicio_id).filter(Boolean)))
+
+  const [clientesResult, serviciosResult] = await Promise.all([
+    clienteIds.length ? supabase.from('clientes').select('*').in('id', clienteIds) : Promise.resolve({ data: [] as Cliente[], error: null }),
+    servicioIds.length ? supabase.from('servicios').select('*').in('id', servicioIds) : Promise.resolve({ data: [] as Servicio[], error: null }),
+  ])
+
+  const clientesById = new Map<string, Cliente>()
+  const serviciosById = new Map<string, Servicio>()
+
+  clientesResult.data?.forEach(cliente => { if (cliente?.id) clientesById.set(cliente.id, cliente) })
+  serviciosResult.data?.forEach(servicio => { if (servicio?.id) serviciosById.set(servicio.id, servicio) })
+
+  return citas.map(cita => ({
+    ...cita,
+    clientes: cita.cliente_id ? clientesById.get(cita.cliente_id) ?? undefined : undefined,
+    servicios: cita.servicio_id ? serviciosById.get(cita.servicio_id) ?? undefined : undefined,
+  }))
 }
 
 // ─── useCitas ─────────────────────────────────────────────────────────────────
@@ -26,37 +44,35 @@ export function useCitas(filterEstado?: CitaEstado | 'all') {
   const [citas, setCitas] = useState<Cita[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const chRef = useRef<any>(null)
 
   const fetchCitas = useCallback(async () => {
     setLoading(true)
     let query = supabase
       .from('citas')
-      .select(`
-        id, cliente_id, servicio_id, fecha_hora_inicio, estado, fecha_creacion,
-        clientes ( id, nombre, email, telefono ),
-        servicios ( id, nombre, duracion_minutos )
-      `)
+      .select('*')
       .order('fecha_hora_inicio', { ascending: true })
 
     if (filterEstado && filterEstado !== 'all') {
       query = query.eq('estado', filterEstado)
     }
 
-    const { data, error: err } = await query
-    if (err) setError(err.message)
-    else setCitas((data as unknown as Cita[]) ?? [])
+    const { data, error } = await query
+    if (error) {
+      setError(error.message)
+      setCitas([])
+    } else {
+      setCitas(await enrichCitasWithRelations(data ?? []))
+    }
     setLoading(false)
   }, [filterEstado])
 
   useEffect(() => {
     fetchCitas()
-    const ch = supabase
-      .channel(mkChannel('citas-admin'))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'citas' }, fetchCitas)
+    const channel = supabase
+      .channel(`citas-admin-changes-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'citas' }, () => fetchCitas())
       .subscribe()
-    chRef.current = ch
-    return () => { supabase.removeChannel(chRef.current); chRef.current = null }
+    return () => { supabase.removeChannel(channel) }
   }, [fetchCitas])
 
   return { citas, loading, error, refetch: fetchCitas }
@@ -67,37 +83,48 @@ export function useCitasCliente(clienteId: string | undefined) {
   const [citas, setCitas] = useState<Cita[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const chRef = useRef<any>(null)
 
   const fetchCitas = useCallback(async () => {
-    if (!clienteId) { setLoading(false); return }
-    setLoading(true)
-    const { data, error: err } = await supabase
-      .from('citas')
-      .select(`
-        id, cliente_id, servicio_id, fecha_hora_inicio, estado, fecha_creacion,
-        servicios ( id, nombre, duracion_minutos )
-      `)
-      .eq('cliente_id', clienteId)
-      .order('fecha_hora_inicio', { ascending: false })
+    if (!clienteId) {
+      setCitas([])
+      setError(null)
+      setLoading(false)
+      return
+    }
 
-    if (err) setError(err.message)
-    else setCitas((data as unknown as Cita[]) ?? [])
+    setLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('citas')
+        .select('*')
+        .eq('cliente_id', clienteId)
+        .order('fecha_hora_inicio', { ascending: false })
+
+      if (error) {
+        setError(error.message)
+        setCitas([])
+      } else {
+        setError(null)
+        setCitas(await enrichCitasWithRelations(data ?? []))
+      }
+    } catch (err) {
+      setError((err as Error).message || 'Error inesperado al obtener citas')
+      setCitas([])
+    }
     setLoading(false)
   }, [clienteId])
 
   useEffect(() => {
     fetchCitas()
     if (!clienteId) return
-    const ch = supabase
-      .channel(mkChannel(`citas-cli-${clienteId.slice(0, 8)}`))
+    const channel = supabase
+      .channel(`citas-cliente-${clienteId}`)
       .on('postgres_changes', {
         event: '*', schema: 'public', table: 'citas',
         filter: `cliente_id=eq.${clienteId}`,
-      }, fetchCitas)
+      }, () => fetchCitas())
       .subscribe()
-    chRef.current = ch
-    return () => { supabase.removeChannel(chRef.current); chRef.current = null }
+    return () => { supabase.removeChannel(channel) }
   }, [fetchCitas, clienteId])
 
   return { citas, loading, error, refetch: fetchCitas }
@@ -107,33 +134,27 @@ export function useCitasCliente(clienteId: string | undefined) {
 export function useCitasPorFecha(fecha: string) {
   const [citas, setCitas] = useState<Cita[]>([])
   const [loading, setLoading] = useState(true)
-  const chRef = useRef<any>(null)
 
   const fetchCitas = useCallback(async () => {
     setLoading(true)
     const { startOfDay, endOfDay } = localDayRange(fecha)
     const { data } = await supabase
       .from('citas')
-      .select(`
-        id, cliente_id, servicio_id, fecha_hora_inicio, estado, fecha_creacion,
-        clientes ( nombre, email ),
-        servicios ( nombre, duracion_minutos )
-      `)
+      .select('*')
       .gte('fecha_hora_inicio', startOfDay)
       .lte('fecha_hora_inicio', endOfDay)
       .order('fecha_hora_inicio', { ascending: true })
-    setCitas((data as unknown as Cita[]) ?? [])
+    setCitas(await enrichCitasWithRelations(data ?? []))
     setLoading(false)
   }, [fecha])
 
   useEffect(() => {
     fetchCitas()
-    const ch = supabase
-      .channel(mkChannel(`citas-fecha`))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'citas' }, fetchCitas)
+    const channel = supabase
+      .channel(`citas-fecha-${fecha}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'citas' }, () => fetchCitas())
       .subscribe()
-    chRef.current = ch
-    return () => { supabase.removeChannel(chRef.current); chRef.current = null }
+    return () => { supabase.removeChannel(channel) }
   }, [fetchCitas, fecha])
 
   return { citas, loading, refetch: fetchCitas }
@@ -142,13 +163,12 @@ export function useCitasPorFecha(fecha: string) {
 // ─── useCitasPorMes ───────────────────────────────────────────────────────────
 export function useCitasPorMes(year: number, month: number) {
   const [citasPorDia, setCitasPorDia] = useState<Record<string, number>>({})
-  const chRef = useRef<any>(null)
 
   const fetchCitas = useCallback(async () => {
     const monthStr = String(month + 1).padStart(2, '0')
-    const lastDay = new Date(year, month + 1, 0).getDate()
+    const lastDayOfMonth = new Date(year, month + 1, 0).getDate()
     const { startOfDay: start } = localDayRange(`${year}-${monthStr}-01`)
-    const { endOfDay: end } = localDayRange(`${year}-${monthStr}-${String(lastDay).padStart(2, '0')}`)
+    const { endOfDay: end } = localDayRange(`${year}-${monthStr}-${String(lastDayOfMonth).padStart(2, '0')}`)
 
     const { data } = await supabase
       .from('citas')
@@ -158,10 +178,10 @@ export function useCitasPorMes(year: number, month: number) {
       .neq('estado', 'cancelada')
 
     const counts: Record<string, number> = {}
-    ;(data ?? []).forEach((c: any) => {
+    data?.forEach(c => {
       if (c.fecha_hora_inicio) {
-        const key = new Date(c.fecha_hora_inicio).toLocaleDateString('en-CA')
-        counts[key] = (counts[key] ?? 0) + 1
+        const localDate = new Date(c.fecha_hora_inicio).toLocaleDateString('en-CA')
+        counts[localDate] = (counts[localDate] ?? 0) + 1
       }
     })
     setCitasPorDia(counts)
@@ -169,43 +189,55 @@ export function useCitasPorMes(year: number, month: number) {
 
   useEffect(() => {
     fetchCitas()
-    const ch = supabase
-      .channel(mkChannel(`citas-mes`))
+    const channel = supabase
+      .channel(`citas-mes-${year}-${month}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'citas' }, fetchCitas)
       .subscribe()
-    chRef.current = ch
-    return () => { supabase.removeChannel(chRef.current); chRef.current = null }
+    return () => { supabase.removeChannel(channel) }
   }, [fetchCitas, year, month])
 
   return citasPorDia
 }
 
 // ─── useHorariosDisponibles ───────────────────────────────────────────────────
+// Returns available time slots for a given date + service duration
+// Business hours: 8am-6pm, slots every 30 min, excludes already-booked times
 export function useHorariosDisponibles(fecha: string, duracionMinutos: number) {
   const [horariosDisponibles, setHorariosDisponibles] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
 
   const fetchHorarios = useCallback(async () => {
-    if (!fecha || !duracionMinutos) { setHorariosDisponibles([]); return }
+    if (!fecha || !duracionMinutos) {
+      setHorariosDisponibles([])
+      setLoading(false)
+      return
+    }
     setLoading(true)
 
     const { startOfDay, endOfDay } = localDayRange(fecha)
+
+    // Get existing appointments for that day (not cancelled)
     const { data: citasDelDia } = await supabase
       .from('citas')
-      .select('fecha_hora_inicio, servicios(duracion_minutos)')
+      .select('fecha_hora_inicio, servicio_id')
       .gte('fecha_hora_inicio', startOfDay)
       .lte('fecha_hora_inicio', endOfDay)
       .neq('estado', 'cancelada')
 
+    const citasConRelaciones = await enrichCitasWithRelations(citasDelDia ?? [])
+
+    // Build occupied intervals
     const ocupados: Array<{ inicio: Date; fin: Date }> = []
-    ;(citasDelDia ?? []).forEach((c: any) => {
+    citasConRelaciones.forEach((c: any) => {
       if (c.fecha_hora_inicio) {
         const inicio = new Date(c.fecha_hora_inicio)
-        const dur = c.servicios?.duracion_minutos ?? 60
-        ocupados.push({ inicio, fin: new Date(inicio.getTime() + dur * 60000) })
+        const duracion = c.servicios?.duracion_minutos ?? 60
+        const fin = new Date(inicio.getTime() + duracion * 60000)
+        ocupados.push({ inicio, fin })
       }
     })
 
+    // Generate slots from 08:00 to 18:00 every 30 minutes
     const slots: string[] = []
     const [y, m, d] = fecha.split('-').map(Number)
     const now = new Date()
@@ -214,10 +246,22 @@ export function useHorariosDisponibles(fecha: string, duracionMinutos: number) {
       for (let min = 0; min < 60; min += 30) {
         const slotStart = new Date(y, m - 1, d, hour, min, 0)
         const slotEnd = new Date(slotStart.getTime() + duracionMinutos * 60000)
+
+        // Skip past slots
         if (slotStart <= now) continue
-        if (slotEnd > new Date(y, m - 1, d, 18, 0, 0)) continue
-        const busy = ocupados.some(o => slotStart < o.fin && slotEnd > o.inicio)
-        if (!busy) slots.push(`${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`)
+
+        // Skip if slot end goes past closing time (18:00)
+        const closing = new Date(y, m - 1, d, 18, 0, 0)
+        if (slotEnd > closing) continue
+
+        // Check overlap with existing appointments
+        const hasOverlap = ocupados.some(o =>
+          slotStart < o.fin && slotEnd > o.inicio
+        )
+
+        if (!hasOverlap) {
+          slots.push(`${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`)
+        }
       }
     }
 
@@ -225,7 +269,9 @@ export function useHorariosDisponibles(fecha: string, duracionMinutos: number) {
     setLoading(false)
   }, [fecha, duracionMinutos])
 
-  useEffect(() => { fetchHorarios() }, [fetchHorarios])
+  useEffect(() => {
+    fetchHorarios()
+  }, [fetchHorarios])
 
   return { horariosDisponibles, loading, refetch: fetchHorarios }
 }
@@ -249,10 +295,10 @@ export function useServicios(soloActivos = false) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    let query = supabase.from('servicios').select('id, nombre, duracion_minutos, activo')
+    let query = supabase.from('servicios').select('*')
     if (soloActivos) query = query.eq('activo', true)
     query.order('nombre', { ascending: true })
-      .then(({ data }) => { setServicios((data as Servicio[]) ?? []); setLoading(false) })
+      .then(({ data }) => { setServicios(data ?? []); setLoading(false) })
   }, [soloActivos])
 
   return { servicios, loading }
@@ -261,56 +307,64 @@ export function useServicios(soloActivos = false) {
 // ─── useAdminStats ────────────────────────────────────────────────────────────
 export function useAdminStats() {
   const [stats, setStats] = useState({
-    citasHoy: 0, totalClientes: 0, completadas: 0,
-    pendientes: 0, confirmadas: 0, canceladas: 0, citasSemana: 0,
+    citasHoy: 0,
+    totalClientes: 0,
+    completadas: 0,
+    pendientes: 0,
+    confirmadas: 0,
+    canceladas: 0,
+    citasSemana: 0,
   })
   const [loading, setLoading] = useState(true)
-  const chRef = useRef<any>(null)
 
   const fetchStats = useCallback(async () => {
     const hoy = new Date().toLocaleDateString('en-CA')
     const { startOfDay, endOfDay } = localDayRange(hoy)
 
+    // Start of current week (Monday)
     const now = new Date()
-    const dow = now.getDay() === 0 ? 6 : now.getDay() - 1
-    const weekStart = new Date(now)
-    weekStart.setDate(now.getDate() - dow)
-    weekStart.setHours(0, 0, 0, 0)
-    const weekEnd = new Date(weekStart)
-    weekEnd.setDate(weekStart.getDate() + 6)
-    weekEnd.setHours(23, 59, 59, 999)
+    const dayOfWeek = now.getDay() === 0 ? 6 : now.getDay() - 1
+    const startOfWeek = new Date(now)
+    startOfWeek.setDate(now.getDate() - dayOfWeek)
+    startOfWeek.setHours(0, 0, 0, 0)
+    const endOfWeek = new Date(startOfWeek)
+    endOfWeek.setDate(startOfWeek.getDate() + 6)
+    endOfWeek.setHours(23, 59, 59, 999)
 
-    const [a, b, c, d, e, f, g] = await Promise.all([
-      supabase.from('citas').select('id', { count: 'exact', head: true }).gte('fecha_hora_inicio', startOfDay).lte('fecha_hora_inicio', endOfDay),
-      supabase.from('clientes').select('id', { count: 'exact', head: true }),
-      supabase.from('citas').select('id', { count: 'exact', head: true }).eq('estado', 'completada'),
-      supabase.from('citas').select('id', { count: 'exact', head: true }).eq('estado', 'pendiente'),
-      supabase.from('citas').select('id', { count: 'exact', head: true }).eq('estado', 'confirmada'),
-      supabase.from('citas').select('id', { count: 'exact', head: true }).eq('estado', 'cancelada'),
-      supabase.from('citas').select('id', { count: 'exact', head: true }).gte('fecha_hora_inicio', weekStart.toISOString()).lte('fecha_hora_inicio', weekEnd.toISOString()).neq('estado', 'cancelada'),
-    ])
+    const [citasHoy, totalClientes, completadas, pendientes, confirmadas, canceladas, citasSemana] =
+      await Promise.all([
+        supabase.from('citas').select('id', { count: 'exact', head: true }).gte('fecha_hora_inicio', startOfDay).lte('fecha_hora_inicio', endOfDay),
+        supabase.from('clientes').select('id', { count: 'exact', head: true }),
+        supabase.from('citas').select('id', { count: 'exact', head: true }).eq('estado', 'completada'),
+        supabase.from('citas').select('id', { count: 'exact', head: true }).eq('estado', 'pendiente'),
+        supabase.from('citas').select('id', { count: 'exact', head: true }).eq('estado', 'confirmada'),
+        supabase.from('citas').select('id', { count: 'exact', head: true }).eq('estado', 'cancelada'),
+        supabase.from('citas').select('id', { count: 'exact', head: true })
+          .gte('fecha_hora_inicio', startOfWeek.toISOString())
+          .lte('fecha_hora_inicio', endOfWeek.toISOString())
+          .neq('estado', 'cancelada'),
+      ])
 
     setStats({
-      citasHoy: a.count ?? 0,
-      totalClientes: b.count ?? 0,
-      completadas: c.count ?? 0,
-      pendientes: d.count ?? 0,
-      confirmadas: e.count ?? 0,
-      canceladas: f.count ?? 0,
-      citasSemana: g.count ?? 0,
+      citasHoy: citasHoy.count ?? 0,
+      totalClientes: totalClientes.count ?? 0,
+      completadas: completadas.count ?? 0,
+      pendientes: pendientes.count ?? 0,
+      confirmadas: confirmadas.count ?? 0,
+      canceladas: canceladas.count ?? 0,
+      citasSemana: citasSemana.count ?? 0,
     })
     setLoading(false)
   }, [])
 
   useEffect(() => {
     fetchStats()
-    const ch = supabase
-      .channel(mkChannel('stats'))
+    const channel = supabase
+      .channel(`stats-changes-${Math.random().toString(36).slice(2)}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'citas' }, fetchStats)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, fetchStats)
       .subscribe()
-    chRef.current = ch
-    return () => { supabase.removeChannel(chRef.current); chRef.current = null }
+    return () => { supabase.removeChannel(channel) }
   }, [fetchStats])
 
   return { stats, loading }
@@ -319,35 +373,35 @@ export function useAdminStats() {
 // ─── useCitasPendientes ───────────────────────────────────────────────────────
 export function useCitasPendientes() {
   const [pendientes, setPendientes] = useState<Cita[]>([])
-  const chRef = useRef<any>(null)
+  const [loading, setLoading] = useState(true)
 
+  // Cambiamos el nombre de "fetch" a "fetchPendientes"
   const fetchPendientes = useCallback(async () => {
+    setLoading(true)
     const { data } = await supabase
       .from('citas')
-      .select(`
-        id, cliente_id, servicio_id, fecha_hora_inicio, estado, fecha_creacion,
-        clientes ( nombre, email, telefono ),
-        servicios ( nombre, duracion_minutos )
-      `)
+      .select('*')
       .eq('estado', 'pendiente')
       .order('fecha_creacion', { ascending: false })
-    setPendientes((data as unknown as Cita[]) ?? [])
+    setPendientes(await enrichCitasWithRelations(data ?? []))
+    setLoading(false)
   }, [])
 
   useEffect(() => {
     fetchPendientes()
-    const ch = supabase
-      .channel(mkChannel('citas-pend'))
+    const channel = supabase
+      .channel(`pendientes-changes-${Math.random().toString(36).slice(2)}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'citas' }, fetchPendientes)
       .subscribe()
-    chRef.current = ch
-    return () => { supabase.removeChannel(chRef.current); chRef.current = null }
-  }, [fetchPendientes])
+    return () => { supabase.removeChannel(channel) }
+  }, [fetchPendientes]) // Actualizamos la dependencia aquí también
 
-  return { pendientes, refetch: fetchPendientes }
+  return { pendientes, refetch: fetchPendientes, loading }
 }
 
 // ─── usePlantillasChatbot ─────────────────────────────────────────────────────
+// Tries to load from Supabase table `plantillas_chatbot`.
+// Falls back gracefully to defaults if table doesn't exist yet.
 const DEFAULT_PLANTILLAS: PlantillaChatbot[] = [
   { id: '1', nombre: 'Bienvenida', trigger: 'inicio', mensaje: '¡Hola! 👋 Bienvenido a nuestro sistema de agendamiento. ¿En qué puedo ayudarte hoy?', activo: true },
   { id: '2', nombre: 'Confirmar Cita', trigger: 'confirmacion', mensaje: '✅ Tu cita ha sido confirmada para el {fecha} a las {hora}. Te enviaremos un recordatorio 24 horas antes.', activo: true },
@@ -364,32 +418,50 @@ export function usePlantillasChatbot() {
 
   const fetchPlantillas = useCallback(async () => {
     setLoading(true)
-    try {
-      const { data, error } = await supabase.from('plantillas_chatbot').select('*').order('nombre')
-      if (error || !data) { setUseLocalFallback(true) }
-      else { setUseLocalFallback(false); setPlantillas(data.length > 0 ? data as PlantillaChatbot[] : DEFAULT_PLANTILLAS) }
-    } catch { setUseLocalFallback(true) }
+    const { data, error } = await supabase
+      .from('plantillas_chatbot')
+      .select('*')
+      .order('nombre', { ascending: true })
+
+    if (error || !data) {
+      // Table doesn't exist yet — use in-memory defaults
+      setUseLocalFallback(true)
+      setPlantillas(DEFAULT_PLANTILLAS)
+    } else {
+      setUseLocalFallback(false)
+      setPlantillas(data.length > 0 ? data : DEFAULT_PLANTILLAS)
+    }
     setLoading(false)
   }, [])
 
   useEffect(() => { fetchPlantillas() }, [fetchPlantillas])
 
   const updatePlantilla = useCallback(async (id: string, updates: Partial<PlantillaChatbot>) => {
-    if (useLocalFallback) { setPlantillas(p => p.map(x => x.id === id ? { ...x, ...updates } : x)); return { error: null } }
+    if (useLocalFallback) {
+      setPlantillas(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p))
+      return { error: null }
+    }
     const { error } = await supabase.from('plantillas_chatbot').update(updates).eq('id', id)
     if (!error) fetchPlantillas()
     return { error }
   }, [useLocalFallback, fetchPlantillas])
 
-  const createPlantilla = useCallback(async (p: Omit<PlantillaChatbot, 'id'>) => {
-    if (useLocalFallback) { setPlantillas(prev => [...prev, { ...p, id: String(Date.now()) }]); return { error: null } }
-    const { error } = await supabase.from('plantillas_chatbot').insert(p)
+  const createPlantilla = useCallback(async (plantilla: Omit<PlantillaChatbot, 'id'>) => {
+    if (useLocalFallback) {
+      const newId = String(Date.now())
+      setPlantillas(prev => [...prev, { ...plantilla, id: newId }])
+      return { error: null }
+    }
+    const { error } = await supabase.from('plantillas_chatbot').insert(plantilla)
     if (!error) fetchPlantillas()
     return { error }
   }, [useLocalFallback, fetchPlantillas])
 
   const deletePlantilla = useCallback(async (id: string) => {
-    if (useLocalFallback) { setPlantillas(p => p.filter(x => x.id !== id)); return { error: null } }
+    if (useLocalFallback) {
+      setPlantillas(prev => prev.filter(p => p.id !== id))
+      return { error: null }
+    }
     const { error } = await supabase.from('plantillas_chatbot').delete().eq('id', id)
     if (!error) fetchPlantillas()
     return { error }
@@ -399,53 +471,60 @@ export function usePlantillasChatbot() {
 }
 
 // ─── useConfiguracionConexiones ───────────────────────────────────────────────
-type ServicioKey = 'whatsapp' | 'google_calendar' | 'apple_calendar'
-interface ConexionState { conectado: boolean; datos: Record<string, string> }
-const CONEXIONES_DEFAULT: Record<ServicioKey, ConexionState> = {
-  whatsapp: { conectado: false, datos: {} },
-  google_calendar: { conectado: false, datos: {} },
-  apple_calendar: { conectado: false, datos: {} },
+// Persists connection config in Supabase table `configuracion_conexiones`.
+// Falls back to localStorage if table doesn't exist.
+const CONEXIONES_DEFAULT: Record<string, ConfiguracionConexion> = {
+  whatsapp: { id: 'whatsapp', servicio: 'whatsapp', conectado: false, datos: {} },
+  google_calendar: { id: 'google_calendar', servicio: 'google_calendar', conectado: false, datos: {} },
+  apple_calendar: { id: 'apple_calendar', servicio: 'apple_calendar', conectado: false, datos: {} },
 }
 
 export function useConfiguracionConexiones() {
-  const [conexiones, setConexiones] = useState<Record<ServicioKey, ConexionState>>(CONEXIONES_DEFAULT)
+  const [conexiones, setConexiones] = useState<Record<string, ConfiguracionConexion>>(CONEXIONES_DEFAULT)
   const [loading, setLoading] = useState(true)
   const [useLocalFallback, setUseLocalFallback] = useState(false)
 
   const fetchConexiones = useCallback(async () => {
     setLoading(true)
-    try {
-      const { data, error } = await supabase.from('configuracion_conexiones').select('*')
-      if (error || !data) {
-        setUseLocalFallback(true)
-        try { const s = localStorage.getItem('conexiones_config'); if (s) setConexiones(JSON.parse(s)) } catch { /* */ }
-      } else {
-        setUseLocalFallback(false)
-        const map = { ...CONEXIONES_DEFAULT } as Record<ServicioKey, ConexionState>
-        data.forEach((c: any) => { if (c.servicio in map) map[c.servicio as ServicioKey] = { conectado: c.conectado ?? false, datos: c.datos ?? {} } })
-        setConexiones(map)
-      }
-    } catch {
+    const { data, error } = await supabase
+      .from('configuracion_conexiones')
+      .select('*')
+
+    if (error || !data) {
+      // Try localStorage fallback
       setUseLocalFallback(true)
+      try {
+        const stored = localStorage.getItem('conexiones_config')
+        if (stored) setConexiones(JSON.parse(stored))
+      } catch { /* ignore */ }
+    } else {
+      setUseLocalFallback(false)
+      const map: Record<string, ConfiguracionConexion> = { ...CONEXIONES_DEFAULT }
+      data.forEach((c: ConfiguracionConexion) => { map[c.servicio] = c })
+      setConexiones(map)
     }
     setLoading(false)
   }, [])
 
   useEffect(() => { fetchConexiones() }, [fetchConexiones])
 
-  const saveConexion = useCallback(async (servicio: string, updates: Partial<ConexionState>) => {
-    const newState = { ...conexiones, [servicio]: { ...conexiones[servicio as ServicioKey], ...updates } }
-    setConexiones(newState)
+  const saveConexion = useCallback(async (servicio: string, updates: Partial<ConfiguracionConexion>) => {
+    const updated = { ...conexiones[servicio], ...updates, servicio }
+
     if (useLocalFallback) {
-      try { localStorage.setItem('conexiones_config', JSON.stringify(newState)) } catch { /* */ }
+      const newState = { ...conexiones, [servicio]: updated }
+      setConexiones(newState)
+      try { localStorage.setItem('conexiones_config', JSON.stringify(newState)) } catch { /* ignore */ }
       return { error: null }
     }
-    const { error } = await supabase.from('configuracion_conexiones').upsert(
-      { servicio, conectado: updates.conectado ?? false, datos: updates.datos ?? {}, updated_at: new Date().toISOString() },
-      { onConflict: 'servicio' }
-    )
+
+    const { error } = await supabase
+      .from('configuracion_conexiones')
+      .upsert({ ...updated, updated_at: new Date().toISOString() }, { onConflict: 'servicio' })
+
+    if (!error) fetchConexiones()
     return { error }
-  }, [conexiones, useLocalFallback])
+  }, [conexiones, useLocalFallback, fetchConexiones])
 
   const disconnectConexion = useCallback(async (servicio: string) => {
     return saveConexion(servicio, { conectado: false, datos: {} })
@@ -455,74 +534,171 @@ export function useConfiguracionConexiones() {
 }
 
 // ─── useNotificacionesCliente ─────────────────────────────────────────────────
+// Loads real notification history for a client based on their appointment status changes.
+// Falls back to deriving notifications from their appointments if table doesn't exist.
 export function useNotificacionesCliente(clienteId: string | undefined) {
   const [notificaciones, setNotificaciones] = useState<NotificacionCliente[]>([])
   const [loading, setLoading] = useState(true)
-  const chRef = useRef<any>(null)
 
   const fetchNotificaciones = useCallback(async () => {
-    if (!clienteId) { setLoading(false); return }
+    if (!clienteId) {
+      setNotificaciones([])
+      setLoading(false)
+      return
+    }
     setLoading(true)
 
-    const { data } = await supabase
-      .from('citas')
-      .select('id, estado, fecha_hora_inicio, fecha_creacion, servicios(nombre)')
+    // Try dedicated notifications table first
+    const { data, error } = await supabase
+      .from('notificaciones_cliente')
+      .select('*, citas(*, servicios(nombre))')
       .eq('cliente_id', clienteId)
-      .order('fecha_creacion', { ascending: false })
+      .order('created_at', { ascending: false })
       .limit(20)
 
-    const derived: NotificacionCliente[] = (data ?? []).map((c: any) => {
-      const servicio = c.servicios?.nombre ?? 'Cita'
-      const fechaHora = c.fecha_hora_inicio ? new Date(c.fecha_hora_inicio) : null
-      const fecha = fechaHora ? fechaHora.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : '—'
-      const hora = fechaHora ? fechaHora.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '—'
-      const mensajes: Record<string, string> = {
-        confirmada: `✅ Tu cita de ${servicio} el ${fecha} a las ${hora} fue confirmada.`,
-        pendiente: `⏳ Tu solicitud de ${servicio} el ${fecha} a las ${hora} está pendiente de aprobación.`,
-        cancelada: `❌ Tu cita de ${servicio} el ${fecha} a las ${hora} fue cancelada.`,
-        completada: `🎉 Tu cita de ${servicio} el ${fecha} fue completada exitosamente.`,
-      }
-      const estado = c.estado ?? 'pendiente'
-      return {
-        id: c.id, cliente_id: clienteId, cita_id: c.id,
-        tipo: estado as NotificacionCliente['tipo'],
-        mensaje: mensajes[estado] ?? mensajes['pendiente'],
-        leida: estado === 'completada',
-        created_at: c.fecha_creacion ?? new Date().toISOString(),
-      }
-    })
-    setNotificaciones(derived)
+    if (error || !data) {
+      // Fallback: derive notifications from appointment status changes
+      const { data: citasData } = await supabase
+        .from('citas')
+        .select('*, servicios(nombre)')
+        .eq('cliente_id', clienteId)
+        .order('fecha_creacion', { ascending: false })
+        .limit(10)
+
+      const derived: NotificacionCliente[] = (citasData ?? []).map((c: any) => {
+        const servicio = c.servicios?.nombre ?? 'Cita'
+        const fecha = c.fecha_hora_inicio
+          ? new Date(c.fecha_hora_inicio).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })
+          : '—'
+        const hora = c.fecha_hora_inicio
+          ? new Date(c.fecha_hora_inicio).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+          : '—'
+
+        const mensajes: Record<string, string> = {
+          confirmada: `✅ Tu cita de ${servicio} el ${fecha} a las ${hora} fue confirmada.`,
+          pendiente: `⏳ Tu cita de ${servicio} el ${fecha} a las ${hora} está pendiente de aprobación.`,
+          cancelada: `❌ Tu cita de ${servicio} el ${fecha} a las ${hora} fue cancelada.`,
+          completada: `🎉 Tu cita de ${servicio} el ${fecha} a las ${hora} fue completada.`,
+        }
+
+        return {
+          id: c.id,
+          cliente_id: clienteId,
+          cita_id: c.id,
+          tipo: (c.estado ?? 'pendiente') as NotificacionCliente['tipo'],
+          mensaje: mensajes[c.estado ?? 'pendiente'] ?? mensajes['pendiente'],
+          leida: c.estado === 'completada' || c.estado === 'cancelada',
+          created_at: c.fecha_creacion ?? new Date().toISOString(),
+          citas: c,
+        }
+      })
+      setNotificaciones(derived)
+    } else {
+      setNotificaciones(data)
+    }
     setLoading(false)
   }, [clienteId])
 
   useEffect(() => {
     fetchNotificaciones()
     if (!clienteId) return
-    const ch = supabase
-      .channel(mkChannel(`notif-cli`))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'citas', filter: `cliente_id=eq.${clienteId}` }, fetchNotificaciones)
+    const channel = supabase
+      .channel(`notif-cliente-${clienteId}-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'citas',
+        filter: `cliente_id=eq.${clienteId}`,
+      }, fetchNotificaciones)
       .subscribe()
-    chRef.current = ch
-    return () => { supabase.removeChannel(chRef.current); chRef.current = null }
+    return () => { supabase.removeChannel(channel) }
   }, [fetchNotificaciones, clienteId])
 
-  const marcarLeida = useCallback((id: string) => {
+  const marcarLeida = useCallback(async (id: string) => {
     setNotificaciones(prev => prev.map(n => n.id === id ? { ...n, leida: true } : n))
+    await supabase.from('notificaciones_cliente').update({ leida: true }).eq('id', id)
   }, [])
 
-  const marcarTodasLeidas = useCallback(() => {
+  const marcarTodasLeidas = useCallback(async () => {
     setNotificaciones(prev => prev.map(n => ({ ...n, leida: true })))
-  }, [])
+    if (clienteId) {
+      await supabase.from('notificaciones_cliente').update({ leida: true }).eq('cliente_id', clienteId)
+    }
+  }, [clienteId])
 
   const noLeidas = notificaciones.filter(n => !n.leida).length
 
   return { notificaciones, loading, noLeidas, marcarLeida, marcarTodasLeidas, refetch: fetchNotificaciones }
 }
 
+// ─── useServicios admin (with CRUD) ──────────────────────────────────────────
+export function useServiciosAdmin() {
+  const [servicios, setServicios] = useState<Servicio[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const fetchServicios = useCallback(async () => {
+    setLoading(true)
+    const { data } = await supabase.from('servicios').select('*').order('nombre', { ascending: true })
+    setServicios(data ?? [])
+    setLoading(false)
+  }, [])
+
+  useEffect(() => { fetchServicios() }, [fetchServicios])
+
+  const createServicio = async (s: Omit<Servicio, 'id'>) => {
+    const { error } = await supabase.from('servicios').insert(s)
+    if (!error) fetchServicios()
+    return { error }
+  }
+
+  const updateServicio = async (id: string, s: Partial<Servicio>) => {
+    const { error } = await supabase.from('servicios').update(s).eq('id', id)
+    if (!error) fetchServicios()
+    return { error }
+  }
+
+  const deleteServicio = async (id: string) => {
+    const { error } = await supabase.from('servicios').delete().eq('id', id)
+    if (!error) fetchServicios()
+    return { error }
+  }
+
+  return { servicios, loading, createServicio, updateServicio, deleteServicio, refetch: fetchServicios }
+}
+
 // ─── Mutation helpers ─────────────────────────────────────────────────────────
 export async function updateEstadoCita(id: string, estado: CitaEstado) {
-  const { error } = await supabase.from('citas').update({ estado }).eq('id', id)
-  return { error }
+  console.log(`[updateEstadoCita] Updating cita ${id} to estado: ${estado}`)
+  try {
+    // First, verify the cita exists
+    const { data: existing, error: fetchError } = await supabase
+      .from('citas')
+      .select('id, estado')
+      .eq('id', id)
+      .single()
+    
+    if (fetchError || !existing) {
+      console.error(`[updateEstadoCita] Cita not found:`, fetchError || 'No data')
+      return { error: fetchError || new Error('Cita no encontrada') }
+    }
+    
+    console.log(`[updateEstadoCita] Found cita with current estado:`, existing.estado)
+    
+    // Now update it
+    const { error, data } = await supabase
+      .from('citas')
+      .update({ estado })
+      .eq('id', id)
+      .select()
+    
+    if (error) {
+      console.error(`[updateEstadoCita] Error updating cita:`, error)
+    } else {
+      console.log(`[updateEstadoCita] Success! Updated data:`, data)
+    }
+    return { error, data }
+  } catch (e) {
+    console.error(`[updateEstadoCita] Exception:`, e)
+    return { error: e as any }
+  }
 }
 
 export async function deleteCita(id: string) {
@@ -531,12 +707,16 @@ export async function deleteCita(id: string) {
 }
 
 export async function crearCita(cita: {
-  cliente_id: string; servicio_id: string
-  fecha_hora_inicio: string; estado: CitaEstado
+  cliente_id: string
+  servicio_id: string
+  fecha_hora_inicio: string
+  estado: CitaEstado
+  notas?: string
 }) {
   const { data, error } = await supabase
     .from('citas')
     .insert({ ...cita, fecha_creacion: new Date().toISOString() })
-    .select().single()
+    .select()
+    .single()
   return { data, error }
 }

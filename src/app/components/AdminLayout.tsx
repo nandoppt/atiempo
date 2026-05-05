@@ -9,7 +9,7 @@ export default function AdminLayout() {
   const location = useLocation()
   const { signOut, user } = useAuth()
   const [showNotifications, setShowNotifications] = useState(false)
-  const { pendientes } = useCitasPendientes()
+  const { pendientes, loading, refetch } = useCitasPendientes()
 
   const navItems = [
     { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -100,7 +100,7 @@ export default function AdminLayout() {
         </header>
 
         <main className="flex-1 p-8 overflow-auto">
-          <Outlet />
+          <Outlet context={{ openNotifications: () => setShowNotifications(true) }} />
         </main>
       </div>
 
@@ -108,6 +108,9 @@ export default function AdminLayout() {
         userType="admin"
         isOpen={showNotifications}
         onClose={() => setShowNotifications(false)}
+        pendientes={pendientes}
+        loadingAdmin={loading}
+        refetchPendientes={refetch}
       />
     </div>
   )

@@ -114,14 +114,42 @@ export default function NuevaCitaModal({ isOpen, onClose, onSuccess, clienteId, 
       }
     }
 
-    const { error } = await supabase.from('citas').insert({
+    const citaPayload: Record<string, any> = {
       cliente_id: resolvedClienteId,
       servicio_id: servicioId,
       fecha_hora_inicio: selectedDate.toISOString(),
       estado: role === 'admin' ? 'confirmada' : 'pendiente',
       fecha_creacion: new Date().toISOString(),
-      notas: notas.trim() || null,
-    })
+    }
+
+    const notasValue = notas.trim()
+    if (notasValue) {
+      citaPayload.notas = notasValue
+    }
+
+    let error = null
+    let insertResult = null
+
+    const insertCita = async (payload: Record<string, any>) => {
+      const result = await supabase.from('citas').insert(payload)
+      return result
+    }
+
+    const firstTry = await insertCita(citaPayload)
+    error = firstTry.error
+    insertResult = firstTry
+
+    if (error && notasValue && error.message?.includes('notas')) {
+      const { error: retryError, data: retryData } = await insertCita({
+        cliente_id: resolvedClienteId,
+        servicio_id: servicioId,
+        fecha_hora_inicio: selectedDate.toISOString(),
+        estado: role === 'admin' ? 'confirmada' : 'pendiente',
+        fecha_creacion: new Date().toISOString(),
+      })
+      error = retryError
+      insertResult = { data: retryData, error: retryError }
+    }
 
     setLoading(false)
 

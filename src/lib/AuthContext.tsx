@@ -20,24 +20,119 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [role, setRole] = useState<UserRole | null>(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setUser(session?.user ?? null)
-      setRole((session?.user?.user_metadata?.role as UserRole) ?? null)
-      setLoading(false)
-    })
+  const resolveUserRole = async (session: Session | null): Promise<UserRole | null> => {
+    if (!session?.user) return null
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const metadataRole = session.user.user_metadata?.role as UserRole | undefined
+    if (metadataRole === 'admin' || metadataRole === 'cliente') {
+      return metadataRole
+    }
+
+    const { data: clienteRecord, error } = await supabase
+      .from('clientes')
+      .select('id')
+      .eq('id', session.user.id)
+      .maybeSingle()
+
+    if (error) {
+      console.warn('[resolveUserRole] Error fetching cliente record:', error.message)
+    }
+    if (clienteRecord?.id) {
+      return 'cliente'
+    }
+
+    return null
+  }
+
+  useEffect(() => {
+    const loadSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
       setSession(session)
       setUser(session?.user ?? null)
-      setRole((session?.user?.user_metadata?.role as UserRole) ?? null)
+
+      const userRole = await resolveUserRole(session)
+      setRole(userRole)
+
+      if (session?.user && userRole === 'cliente') {
+        await ensureClienteRecord(session.user)
+      }
+
+      setLoading(false)
+    }
+
+    loadSession()
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      setLoading(true)
+      setSession(session)
+      setUser(session?.user ?? null)
+
+      const userRole = await resolveUserRole(session)
+      setRole(userRole)
+
+      if (session?.user && userRole === 'cliente') {
+        await ensureClienteRecord(session.user)
+      }
+
+      setLoading(false)
     })
 
     return () => subscription.unsubscribe()
   }, [])
+
+  const ensureClienteRecord = async (user: User) => {
+    try {
+      // Check if cliente record already exists
+      const { data: existingCliente } = await supabase
+        .from('clientes')
+        .select('id')
+        .eq('id', user.id)
+        .maybeSingle() // Use maybeSingle to avoid errors when no record exists
+
+      if (existingCliente) {
+        console.log('[ensureClienteRecord] Cliente record already exists')
+        return
+      }
+
+      // Create cliente record if it doesn't exist
+      const clienteData = {
+        id: user.id,
+        email: user.email!,
+        nombre: user.user_metadata?.nombre || user.email!.split('@')[0], // Fallback to email prefix
+        telefono: null,
+        fecha_registro: new Date().toISOString() // Use current time, not user.created_at
+      }
+
+      console.log('[ensureClienteRecord] Creating cliente record:', clienteData)
+
+      const { error: insertError } = await supabase.from('clientes').insert(clienteData)
+
+      if (insertError) {
+        console.error('[ensureClienteRecord] Error creating cliente record:', insertError)
+        
+        // If it's a duplicate key error, the record might already exist
+        if (insertError.code === '23505') { // PostgreSQL duplicate key error
+          console.log('[ensureClienteRecord] Record already exists (duplicate key)')
+        } else {
+          // For other errors, try to update instead of insert (upsert-like behavior)
+          console.log('[ensureClienteRecord] Trying upsert approach...')
+          const { error: upsertError } = await supabase
+            .from('clientes')
+            .upsert(clienteData, { onConflict: 'id' })
+          
+          if (upsertError) {
+            console.error('[ensureClienteRecord] Upsert also failed:', upsertError)
+          } else {
+            console.log('[ensureClienteRecord] Cliente record created via upsert')
+          }
+        }
+      } else {
+        console.log('[ensureClienteRecord] Cliente record created successfully')
+      }
+    } catch (error) {
+      console.error('[ensureClienteRecord] Exception:', error)
+    }
+  }
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
@@ -45,6 +140,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const signUp = async (email: string, password: string, role: UserRole, nombre?: string) => {
+    console.log('[signUp] Starting signup process:', { email, role, nombre })
+    
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -53,15 +150,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     })
 
-    // If signing up as cliente, also create a record in the clientes table
-    if (!error && data.user && role === 'cliente') {
-      await supabase.from('clientes').insert({
-        id: data.user.id,
-        email,
-        nombre: nombre ?? '',
-        fecha_registro: new Date().toISOString()
-      })
-    }
+    console.log('[signUp] Auth signup result:', { data: data ? 'success' : null, error })
+
+    // Note: Cliente record will be created on first login via ensureClienteRecord
+    // This avoids timing issues and RLS policy problems during signup
 
     return { error }
   }

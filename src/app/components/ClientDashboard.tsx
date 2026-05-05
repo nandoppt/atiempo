@@ -6,10 +6,29 @@ import NuevaCitaModal from './NuevaCitaModal'
 
 export default function ClientDashboard() {
   const { user } = useAuth()
-  const { citas, loading, refetch } = useCitasCliente(user?.id)
+  const { citas, loading, error, refetch } = useCitasCliente(user?.id)
   const [showModal, setShowModal] = useState(false)
 
   const nombre = user?.user_metadata?.nombre ?? user?.email?.split('@')[0] ?? 'Cliente'
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-white rounded-2xl shadow-sm border border-red-100 p-8">
+          <h2 className="text-2xl font-semibold text-red-700">No se pudo cargar tus citas</h2>
+          <p className="mt-3 text-sm text-red-600">
+            Hubo un problema al obtener tus datos. Intenta recargar o vuelve a iniciar sesión.
+          </p>
+          <button
+            onClick={refetch}
+            className="mt-6 inline-flex items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 transition-colors"
+          >
+            Reintentar
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   const upcoming = citas.filter(c =>
     c.estado !== 'cancelada' &&

@@ -40,6 +40,14 @@ export interface Servicio {
   activo: boolean | null
 }
 
+export interface ConfiguracionConexion {
+  id: string
+  servicio: string
+  conectado: boolean
+  datos: Record<string, any>
+  updated_at?: string
+}
+
 export interface Configuracion {
   id: number
   mensaje_bienvenida: string

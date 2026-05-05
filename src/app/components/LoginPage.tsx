@@ -43,10 +43,15 @@ export default function LoginPage() {
     } else {
       const { error } = await signUp(email, password, role, nombre)
       if (error) {
+        console.error('[LoginPage] Signup error:', error)
         if (error.message.includes('already registered')) {
           toast.error('Este email ya tiene una cuenta. Inicia sesión.')
+        } else if (error.message.includes('Password should be at least')) {
+          toast.error('La contraseña debe tener al menos 6 caracteres')
+        } else if (error.message.includes('Unable to validate email address')) {
+          toast.error('El formato del email no es válido')
         } else {
-          toast.error(error.message)
+          toast.error(`Error al crear cuenta: ${error.message}`)
         }
       } else {
         toast.success('¡Cuenta creada! Inicia sesión para continuar.', { duration: 5000 })
