@@ -10,6 +10,7 @@ import CalendarView from './components/CalendarView'
 import ChatbotConfig from './components/ChatbotConfig'
 import ConnectionsConfig from './components/ConnectionsConfig'
 import AppointmentList from './components/AppointmentList'
+import UserManagement from './components/UserManagement'
 import { Loader2 } from 'lucide-react'
 
 function AppRoutes() {
@@ -29,13 +30,20 @@ function AppRoutes() {
 
   return (
     <Routes>
-      {role === 'admin' ? (
+      {role === 'super_admin' ? (
         <Route path="/" element={<AdminLayout />}>
           <Route index element={<AdminDashboard />} />
           <Route path="calendar" element={<CalendarView />} />
           <Route path="appointments" element={<AppointmentList userType="admin" />} />
+          <Route path="users" element={<UserManagement />} />
           <Route path="chatbot" element={<ChatbotConfig />} />
           <Route path="connections" element={<ConnectionsConfig />} />
+        </Route>
+      ) : role === 'admin_citas' ? (
+        <Route path="/" element={<AdminLayout />}>
+          <Route index element={<AdminDashboard />} />
+          <Route path="calendar" element={<CalendarView />} />
+          <Route path="appointments" element={<AppointmentList userType="admin" />} />
         </Route>
       ) : (
         <Route path="/" element={<ClientLayout />}>

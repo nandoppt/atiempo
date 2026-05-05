@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Calendar, MessageSquare, Settings, LogOut, Bell, List, Clock } from 'lucide-react'
+import { LayoutDashboard, Calendar, MessageSquare, Settings, LogOut, Bell, List, Clock, Users } from 'lucide-react'
 import { useState } from 'react'
 import NotificationPanel from './NotificationPanel'
 import { useAuth } from '../../lib/AuthContext'
@@ -7,17 +7,23 @@ import { useCitasPendientes } from '../../lib/hooks'
 
 export default function AdminLayout() {
   const location = useLocation()
-  const { signOut, user } = useAuth()
+  const { signOut, user, role } = useAuth()
   const [showNotifications, setShowNotifications] = useState(false)
   const { pendientes, loading, refetch } = useCitasPendientes()
 
-  const navItems = [
+  const baseNavItems = [
     { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/calendar', icon: Calendar, label: 'Calendario' },
     { path: '/appointments', icon: List, label: 'Citas' },
+  ]
+
+  const superAdminNavItems = [
     { path: '/chatbot', icon: MessageSquare, label: 'Chatbot' },
     { path: '/connections', icon: Settings, label: 'Conexiones' },
+    { path: '/users', icon: Users, label: 'Usuarios' },
   ]
+
+  const navItems = role === 'super_admin' ? [...baseNavItems, ...superAdminNavItems] : baseNavItems
 
   return (
     <div className="min-h-screen bg-gray-50 flex">

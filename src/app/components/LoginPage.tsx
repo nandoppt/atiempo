@@ -97,7 +97,7 @@ export default function LoginPage() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de cuenta</label>
                 <div className="flex gap-3">
-                  {(['cliente', 'admin'] as UserRole[]).map(r => (
+                  {(['cliente', 'admin_citas'] as UserRole[]).map(r => (
                     <button
                       key={r}
                       type="button"
@@ -106,7 +106,7 @@ export default function LoginPage() {
                         role === r ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
                       }`}
                     >
-                      {r === 'cliente' ? '👤 Cliente' : '🔑 Administrador'}
+                      {r === 'cliente' ? '👤 Cliente' : '📅 Admin de Citas'}
                     </button>
                   ))}
                 </div>

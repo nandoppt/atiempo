@@ -1,6 +1,7 @@
 import { Calendar, Users, CheckCircle, Clock, TrendingUp, MessageSquare, AlertCircle, XCircle, CalendarCheck, Bell } from 'lucide-react'
 import { useAdminStats, useCitas } from '../../lib/hooks'
 import { useOutletContext } from 'react-router-dom'
+import { useAuth } from '../../lib/AuthContext'
 
 interface AdminDashboardOutletContext {
   openNotifications: () => void
@@ -10,20 +11,14 @@ export default function AdminDashboard() {
   const { openNotifications } = useOutletContext<AdminDashboardOutletContext>()
   const { stats, loading: statsLoading } = useAdminStats()
   const { citas: proximasCitas, loading: citasLoading } = useCitas()
+  const { role } = useAuth()
 
-  const statsConfig = [
+  const baseStats = [
     {
       label: 'Citas Hoy',
       value: stats.citasHoy,
       icon: Calendar,
       color: 'bg-blue-500',
-      onClick: undefined,
-    },
-    {
-      label: 'Total Clientes',
-      value: stats.totalClientes,
-      icon: Users,
-      color: 'bg-green-500',
       onClick: undefined,
     },
     {
@@ -42,6 +37,18 @@ export default function AdminDashboard() {
       onClick: stats.pendientes > 0 ? openNotifications : undefined,
     },
   ]
+
+  const superAdminStats = [
+    {
+      label: 'Total Clientes',
+      value: stats.totalClientes,
+      icon: Users,
+      color: 'bg-green-500',
+      onClick: undefined,
+    },
+  ]
+
+  const statsConfig = role === 'super_admin' ? [...baseStats, ...superAdminStats] : baseStats
 
   const upcoming = proximasCitas
     .filter(c => c.estado !== 'cancelada' && c.fecha_hora_inicio && new Date(c.fecha_hora_inicio) >= new Date())

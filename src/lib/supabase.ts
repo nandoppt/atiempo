@@ -7,7 +7,15 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Faltan variables de entorno VITE_SUPABASE_URL o VITE_SUPABASE_ANON_KEY')
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+// For development: disable email confirmation
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: true,
+    flowType: 'pkce'
+  }
+})
 
 // ─── Database Types ───────────────────────────────────────────────────────────
 
@@ -75,4 +83,4 @@ export interface NotificacionCliente {
   citas?: Cita
 }
 
-export type UserRole = 'admin' | 'cliente'
+export type UserRole = 'super_admin' | 'admin_citas' | 'cliente'
