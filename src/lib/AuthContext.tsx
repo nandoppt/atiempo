@@ -8,7 +8,8 @@ interface AuthContextType {
   role: UserRole | null
   loading: boolean
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>
-  signUp: (email: string, password: string, role: UserRole, nombre?: string) => Promise<{ error: Error | null }>
+  signUp: (email: string, password: string, role: UserRole, nombre?: string, telefono?: string) => Promise<{ error: Error | null }>
+  createAdminUser: (email: string, password: string, nombre?: string) => Promise<{ error: Error | null }>
   signOut: () => Promise<void>
 }
 
@@ -111,7 +112,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         id: user.id,
         email: user.email!,
         nombre: user.user_metadata?.nombre || user.email!.split('@')[0], // Fallback to email prefix
-        telefono: null,
+        telefono: user.user_metadata?.telefono ?? null,
         fecha_registro: new Date().toISOString() // Use current time, not user.created_at
       }
 
@@ -171,21 +172,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error }
   }
 
-  const signUp = async (email: string, password: string, role: UserRole, nombre?: string) => {
-    console.log('[signUp] Starting signup process:', { email, role, nombre })
-    
+  const signUp = async (email: string, password: string, userRole: UserRole, nombre?: string, telefono?: string) => {
+    console.log('[signUp] Starting signup process:', { email, userRole, nombre, telefono })
+
+    if (userRole !== 'cliente' && userRole !== 'admin_citas') {
+      return { error: new Error('Rol inválido') }
+    }
+
+    if (userRole === 'admin_citas' && role !== 'super_admin') {
+      return { error: new Error('Solo superadmin puede crear usuarios administradores') }
+    }
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: { role, nombre: nombre ?? '' }
+        data: { role: userRole, nombre: nombre ?? '', telefono: telefono ?? null }
       }
     })
 
     console.log('[signUp] Auth signup result:', { data: data ? 'success' : null, error })
 
-    // Note: Cliente record will be created on first login via ensureClienteRecord
-    // This avoids timing issues and RLS policy problems during signup
+    return { error }
+  }
+
+  const createAdminUser = async (email: string, password: string, nombre?: string) => {
+    if (role !== 'super_admin') {
+      return { error: new Error('Solo superadmin puede crear administradores') }
+    }
+
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { role: 'admin_citas', nombre: nombre ?? '' }
+      }
+    })
 
     return { error }
   }
@@ -195,7 +217,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, session, role, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ user, session, role, loading, signIn, signUp, createAdminUser, signOut }}>
       {children}
     </AuthContext.Provider>
   )

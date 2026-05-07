@@ -2,15 +2,14 @@ import { useState } from 'react'
 import { Clock, Eye, EyeOff, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '../../lib/AuthContext'
-import { UserRole } from '../../lib/supabase'
 
 export default function LoginPage() {
   const { signIn, signUp } = useAuth()
   const [mode, setMode] = useState<'login' | 'register'>('login')
-  const [role, setRole] = useState<UserRole>('cliente')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [nombre, setNombre] = useState('')
+  const [telefono, setTelefono] = useState('')
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading] = useState(false)
 
@@ -19,6 +18,10 @@ export default function LoginPage() {
 
     if (mode === 'register' && nombre.trim().length < 2) {
       toast.error('Ingresa tu nombre completo')
+      return
+    }
+    if (mode === 'register' && telefono.trim().length < 8) {
+      toast.error('Ingresa un número de teléfono para seguimiento')
       return
     }
     if (password.length < 6) {
@@ -41,7 +44,7 @@ export default function LoginPage() {
       }
       // On success AuthContext updates and App redirects automatically
     } else {
-      const { error } = await signUp(email, password, role, nombre)
+      const { error } = await signUp(email, password, 'cliente', nombre, telefono)
       if (error) {
         console.error('[LoginPage] Signup error:', error)
         if (error.message.includes('already registered')) {
@@ -92,40 +95,32 @@ export default function LoginPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Role - only register */}
-            {mode === 'register' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de cuenta</label>
-                <div className="flex gap-3">
-                  {(['cliente', 'admin_citas'] as UserRole[]).map(r => (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => setRole(r)}
-                      className={`flex-1 py-3 rounded-xl border-2 text-sm font-medium transition-all ${
-                        role === r ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                      }`}
-                    >
-                      {r === 'cliente' ? '👤 Cliente' : '📅 Admin de Citas'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* Nombre - only register */}
             {mode === 'register' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Nombre completo</label>
-                <input
-                  type="text"
-                  value={nombre}
-                  onChange={e => setNombre(e.target.value)}
-                  placeholder="Tu nombre"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-sm"
-                  required
-                />
-              </div>
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Nombre completo</label>
+                  <input
+                    type="text"
+                    value={nombre}
+                    onChange={e => setNombre(e.target.value)}
+                    placeholder="Tu nombre"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-sm"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Teléfono</label>
+                  <input
+                    type="tel"
+                    value={telefono}
+                    onChange={e => setTelefono(e.target.value)}
+                    placeholder="+56 9 1234 5678"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-sm"
+                    required
+                  />
+                </div>
+              </>
             )}
 
             {/* Email */}

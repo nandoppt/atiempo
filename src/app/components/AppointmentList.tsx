@@ -1,7 +1,7 @@
-import { Calendar, Clock, Trash2, CheckCircle, X, Filter, AlertTriangle, Loader2, User } from 'lucide-react'
+import { Calendar, Clock, Trash2, CheckCircle, X, Filter, AlertTriangle, Loader2, User, Edit } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { useCitas, useCitasCliente, updateEstadoCita, deleteCita } from '../../lib/hooks'
+import { useCitas, useCitasCliente, updateEstadoCita, deleteCita, updateCita } from '../../lib/hooks'
 import { useAuth } from '../../lib/AuthContext'
 import { CitaEstado } from '../../lib/supabase'
 import NuevaCitaModal from './NuevaCitaModal'
@@ -16,6 +16,9 @@ export default function AppointmentList({ userType }: AppointmentListProps) {
   const [showModal, setShowModal] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [procesando, setProcesando] = useState<string | null>(null)
+  const [editingCitaId, setEditingCitaId] = useState<string | null>(null)
+  const [editFecha, setEditFecha] = useState('')
+  const [editHora, setEditHora] = useState('')
 
   const adminQuery = useCitas(filterStatus)
   const clientQuery = useCitasCliente(userType === 'client' ? user?.id : undefined)
@@ -59,6 +62,50 @@ export default function AppointmentList({ userType }: AppointmentListProps) {
     } else {
       toast.success('Cita eliminada correctamente')
       await refetch()
+    }
+    setProcesando(null)
+  }
+
+  const handleStartEdit = (cita: any) => {
+    setEditingCitaId(cita.id)
+    setEditFecha(cita.fecha_hora_inicio ? new Date(cita.fecha_hora_inicio).toISOString().slice(0, 10) : '')
+    setEditHora(cita.fecha_hora_inicio
+      ? new Date(cita.fecha_hora_inicio).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false })
+      : '')
+  }
+
+  const handleCancelEdit = () => {
+    setEditingCitaId(null)
+    setEditFecha('')
+    setEditHora('')
+  }
+
+  const handleSaveEdit = async (id: string, nombreCliente: string) => {
+    if (!editFecha || !editHora) {
+      toast.error('Selecciona fecha y hora para reagendar')
+      return
+    }
+
+    const newDate = new Date(`${editFecha}T${editHora}:00`)
+    if (newDate <= new Date()) {
+      toast.error('No puedes agendar una cita en el pasado')
+      return
+    }
+
+    const hour = newDate.getHours()
+    if (hour < 8 || hour >= 18) {
+      toast.error('El horario de atención es de 8:00 a 18:00')
+      return
+    }
+
+    setProcesando(id)
+    const { error } = await updateCita(id, newDate.toISOString())
+    if (error) {
+      toast.error('Error al reagendar la cita')
+    } else {
+      toast.success(`Cita de ${nombreCliente} reagendada`) 
+      await refetch()
+      handleCancelEdit()
     }
     setProcesando(null)
   }
@@ -272,6 +319,17 @@ export default function AppointmentList({ userType }: AppointmentListProps) {
                           }
                           Cancelar
                         </button>
+
+                        {userType === 'admin' && (
+                          <button
+                            onClick={() => handleStartEdit(cita)}
+                            disabled={isProcessing}
+                            className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 active:bg-indigo-200 transition-all text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed border border-indigo-200"
+                          >
+                            <Edit className="w-4 h-4" />
+                            Reagendar
+                          </button>
+                        )}
                       </>
                     )}
 
@@ -312,6 +370,48 @@ export default function AppointmentList({ userType }: AppointmentListProps) {
                   </div>
                 </div>
               </div>
+
+              {editingCitaId === cita.id && (
+                <div className="border-t border-gray-100 px-5 pb-5 pt-4 bg-gray-50">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Nueva fecha</label>
+                      <input
+                        type="date"
+                        value={editFecha}
+                        onChange={(e) => setEditFecha(e.target.value)}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Nueva hora</label>
+                      <input
+                        type="time"
+                        value={editHora}
+                        onChange={(e) => setEditHora(e.target.value)}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 mt-4">
+                    <button
+                      type="button"
+                      onClick={() => handleSaveEdit(cita.id, nombreCliente)}
+                      disabled={procesando === cita.id}
+                      className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {procesando === cita.id ? 'Guardando...' : 'Guardar cambio'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelEdit}
+                      className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-all text-sm font-medium"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Pending highlight bar */}
               {isPendiente && userType === 'admin' && !isProcessing && (

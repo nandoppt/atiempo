@@ -1,18 +1,45 @@
 import { useState } from 'react'
 import { Search, User, Mail, Calendar, MoreHorizontal, Edit, Trash2, X, Save } from 'lucide-react'
+import { toast } from 'sonner'
 import { useClientes } from '../../lib/hooks'
+import { useAuth } from '../../lib/AuthContext'
 import { supabase } from '../../lib/supabase'
 
 export default function UserManagement() {
+  const { role, createAdminUser } = useAuth()
   const { clientes, loading } = useClientes()
   const [searchTerm, setSearchTerm] = useState('')
   const [editingUser, setEditingUser] = useState<string | null>(null)
   const [editForm, setEditForm] = useState({ nombre: '', telefono: '' })
+  const [newAdminEmail, setNewAdminEmail] = useState('')
+  const [newAdminNombre, setNewAdminNombre] = useState('')
+  const [newAdminPassword, setNewAdminPassword] = useState('')
+  const [creatingAdmin, setCreatingAdmin] = useState(false)
 
   const filteredClientes = clientes.filter(cliente =>
     cliente.nombre?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     cliente.email.toLowerCase().includes(searchTerm.toLowerCase())
   )
+
+  const handleCreateAdmin = async () => {
+    if (!newAdminEmail || !newAdminPassword || !newAdminNombre) {
+      toast.error('Completa todos los datos para crear un administrador')
+      return
+    }
+
+    setCreatingAdmin(true)
+    const { error } = await createAdminUser(newAdminEmail, newAdminPassword, newAdminNombre)
+    setCreatingAdmin(false)
+
+    if (error) {
+      toast.error(error.message || 'Error creando administrador')
+    } else {
+      toast.success('Administrador de citas creado correctamente')
+      setNewAdminEmail('')
+      setNewAdminNombre('')
+      setNewAdminPassword('')
+    }
+  }
 
   const handleEdit = (cliente: any) => {
     setEditingUser(cliente.id)
@@ -57,6 +84,48 @@ export default function UserManagement() {
             <p className="text-sm text-gray-500 mt-1">Administra los usuarios clientes registrados</p>
           </div>
         </div>
+
+        {role === 'super_admin' && (
+          <div className="mb-6 bg-slate-50 border border-slate-200 rounded-2xl p-5">
+            <div className="mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Crear administrador de citas</h3>
+              <p className="text-sm text-gray-500">Solo superadmin puede crear usuarios admin.</p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <input
+                type="email"
+                value={newAdminEmail}
+                onChange={(e) => setNewAdminEmail(e.target.value)}
+                placeholder="Email del admin"
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+              />
+              <input
+                type="text"
+                value={newAdminNombre}
+                onChange={(e) => setNewAdminNombre(e.target.value)}
+                placeholder="Nombre completo"
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+              />
+              <input
+                type="password"
+                value={newAdminPassword}
+                onChange={(e) => setNewAdminPassword(e.target.value)}
+                placeholder="Contraseña"
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+              />
+            </div>
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={handleCreateAdmin}
+                disabled={creatingAdmin}
+                className="px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all text-sm font-medium disabled:opacity-50"
+              >
+                {creatingAdmin ? 'Creando administrador...' : 'Crear administrador de citas'}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Search */}
         <div className="relative mb-6">

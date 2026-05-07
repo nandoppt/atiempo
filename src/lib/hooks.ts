@@ -701,6 +701,28 @@ export async function updateEstadoCita(id: string, estado: CitaEstado) {
   }
 }
 
+export async function updateCita(id: string, fecha_hora_inicio: string) {
+  console.log(`[updateCita] Updating cita ${id} to fecha_hora_inicio: ${fecha_hora_inicio}`)
+  try {
+    const { error, data } = await supabase
+      .from('citas')
+      .update({ fecha_hora_inicio })
+      .eq('id', id)
+      .select()
+
+    if (error) {
+      console.error(`[updateCita] Error updating cita:`, error)
+    } else {
+      console.log(`[updateCita] Success! Updated data:`, data)
+    }
+
+    return { error, data }
+  } catch (e) {
+    console.error(`[updateCita] Exception:`, e)
+    return { error: e as any }
+  }
+}
+
 export async function deleteCita(id: string) {
   const { error } = await supabase.from('citas').delete().eq('id', id)
   return { error }
