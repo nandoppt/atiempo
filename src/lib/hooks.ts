@@ -161,8 +161,15 @@ export function useCitasPorFecha(fecha: string) {
 }
 
 // ─── useCitasPorMes ───────────────────────────────────────────────────────────
+export type CitasPorDia = {
+  total: number
+  pendiente: number
+  confirmada: number
+  completada: number
+}
+
 export function useCitasPorMes(year: number, month: number) {
-  const [citasPorDia, setCitasPorDia] = useState<Record<string, number>>({})
+  const [citasPorDia, setCitasPorDia] = useState<Record<string, CitasPorDia>>({})
 
   const fetchCitas = useCallback(async () => {
     const monthStr = String(month + 1).padStart(2, '0')
@@ -177,12 +184,23 @@ export function useCitasPorMes(year: number, month: number) {
       .lte('fecha_hora_inicio', end)
       .neq('estado', 'cancelada')
 
-    const counts: Record<string, number> = {}
+    const counts: Record<string, CitasPorDia> = {}
     data?.forEach(c => {
-      if (c.fecha_hora_inicio) {
-        const localDate = new Date(c.fecha_hora_inicio).toLocaleDateString('en-CA')
-        counts[localDate] = (counts[localDate] ?? 0) + 1
+      if (!c.fecha_hora_inicio) return
+      const localDate = new Date(c.fecha_hora_inicio).toLocaleDateString('en-CA')
+      const estado = c.estado ?? 'pendiente'
+
+      counts[localDate] = counts[localDate] ?? {
+        total: 0,
+        pendiente: 0,
+        confirmada: 0,
+        completada: 0,
       }
+
+      counts[localDate].total += 1
+      if (estado === 'pendiente') counts[localDate].pendiente += 1
+      if (estado === 'confirmada') counts[localDate].confirmada += 1
+      if (estado === 'completada') counts[localDate].completada += 1
     })
     setCitasPorDia(counts)
   }, [year, month])

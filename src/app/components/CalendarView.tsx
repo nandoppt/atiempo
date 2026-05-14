@@ -10,6 +10,17 @@ export default function CalendarView() {
   const { citas, loading } = useCitasPorFecha(selectedDateKey)
   const citasPorDia = useCitasPorMes(currentDate.getFullYear(), currentDate.getMonth())
 
+  // resumen mensual de citas por estado para mostrar información dinámica en la vista del calendario
+  const resumenMes = Object.values(citasPorDia).reduce(
+    (acc, item) => ({
+      total: acc.total + item.total,
+      pendiente: acc.pendiente + item.pendiente,
+      confirmada: acc.confirmada + item.confirmada,
+      completada: acc.completada + item.completada,
+    }),
+    { total: 0, pendiente: 0, confirmada: 0, completada: 0 }
+  )
+
   const monthNames = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
   const daysOfWeek = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb']
 
@@ -80,8 +91,9 @@ export default function CalendarView() {
                 return <div key={`empty-${index}`} className="aspect-square" />
               }
               const dayKey = getDayKey(date)
-              const citaCount = citasPorDia[dayKey] ?? 0
-              const hasCitas = citaCount > 0
+              const dayData = citasPorDia[dayKey] ?? { total: 0, pendiente: 0, confirmada: 0, completada: 0 }
+              const hasCitas = dayData.total > 0
+              const hasPendientes = dayData.pendiente > 0
               const selected = isSelected(date)
               const today = isToday(date)
 
@@ -89,39 +101,62 @@ export default function CalendarView() {
                 <button
                   key={index}
                   onClick={() => setSelectedDate(date)}
-                  className={`aspect-square p-1 rounded-lg transition-all text-sm font-medium flex flex-col items-center justify-center gap-0.5 ${
+                  className={`relative aspect-square p-1 rounded-xl transition-all text-sm font-medium flex flex-col items-center justify-center gap-0.5 ${
                     selected
-                      ? 'bg-indigo-600 text-white shadow-md'
-                      : today
-                      ? 'bg-indigo-50 text-indigo-600 border-2 border-indigo-200'
+                      ? 'bg-indigo-600 text-white shadow-lg'
+                      : hasPendientes
+                      ? 'bg-amber-50 text-amber-900 border border-amber-200 shadow-sm'
+                      : hasCitas
+                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-100'
                       : 'hover:bg-gray-50 text-gray-700'
                   }`}
                 >
                   <span>{date.getDate()}</span>
-                  {hasCitas && (
-                    <span className={`block w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                      selected ? 'bg-white/70' : 'bg-indigo-400'
-                    }`} />
+
+                  {/* mostrar indicador de estado cuando hay citas en el día */}
+                  {hasCitas ? (
+                    <div className="flex items-center gap-1 mt-1">
+                      {dayData.pendiente > 0 && (
+                        <span className="inline-flex h-2.5 w-2.5 rounded-full bg-amber-500" aria-label="Pendientes" />
+                      )}
+                      {dayData.confirmada > 0 && (
+                        <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" aria-label="Confirmadas" />
+                      )}
+                      {dayData.completada > 0 && (
+                        <span className="inline-flex h-2.5 w-2.5 rounded-full bg-sky-500" aria-label="Completadas" />
+                      )}
+                    </div>
+                  ) : (
+                    <span className="block w-1.5 h-1.5 flex-shrink-0" />
                   )}
-                  {!hasCitas && <span className="block w-1.5 h-1.5 flex-shrink-0" />}
+
+                  {hasCitas && (
+                    <span className="absolute top-2 right-2 rounded-full bg-black/10 px-2 py-0.5 text-[10px] font-semibold text-gray-700">
+                      {dayData.total}
+                    </span>
+                  )}
                 </button>
               )
             })}
           </div>
         </div>
 
-        <div className="p-6 bg-gray-50 flex items-center gap-6">
+        <div className="p-6 bg-gray-50 grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-green-500" />
-            <span className="text-sm text-gray-600">Disponible</span>
+            <div className="w-3 h-3 rounded-full bg-amber-500" />
+            <span className="text-sm text-gray-600">Pendientes ({resumenMes.pendiente})</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-red-500" />
-            <span className="text-sm text-gray-600">Ocupado</span>
+            <div className="w-3 h-3 rounded-full bg-emerald-500" />
+            <span className="text-sm text-gray-600">Confirmadas ({resumenMes.confirmada})</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
-            <span className="text-sm text-gray-600">Con citas</span>
+            <div className="w-3 h-3 rounded-full bg-sky-500" />
+            <span className="text-sm text-gray-600">Completadas ({resumenMes.completada})</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-indigo-400" />
+            <span className="text-sm text-gray-600">Días ocupados ({Object.keys(citasPorDia).length})</span>
           </div>
         </div>
       </div>
